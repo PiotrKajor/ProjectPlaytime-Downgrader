@@ -6,7 +6,7 @@
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
-![Wersja](https://img.shields.io/badge/wersja-1.0.0-D42E33?style=for-the-badge)
+![Wersja](https://img.shields.io/badge/wersja-1.1.0-D42E33?style=for-the-badge)
 ![Licencja](https://img.shields.io/badge/licencja-MIT-ECB524?style=for-the-badge)
 
 **Instalator starszych kompilacji gry PROJECT: PLAYTIME.**
@@ -23,7 +23,7 @@ Jeden plik do kliknięcia. Zero konfiguracji, zero zależności do zainstalowani
 
 ```
 ════════════════════════════════════════════════════════════════════
-  PROJECT: PLAYTIME  ·  DOWNGRADER                          v1.0.0
+  PROJECT: PLAYTIME  ·  DOWNGRADER                          v1.1.0
 ════════════════════════════════════════════════════════════════════
   Pobieranie zawartości
 
@@ -98,11 +98,35 @@ identyfikator i zapisze go ponownie.
 
 ---
 
+## Gdy gra nie jest zainstalowana
+
+Program nie kończy działania komunikatem „zainstaluj grę i wróć”. Sam doprowadza
+system do wymaganego stanu: uruchamia klienta Steam, otwiera okno instalacji
+(`steam://install/1961460`, dla gry darmowej obejmuje to dodanie jej do konta)
+i czeka na potwierdzenie. Kliknięcie **Instaluj** pozostaje po stronie
+użytkownika — dodania produktu do konta nie powinien wykonywać za niego skrypt.
+
+Dalej dostępne są dwa warianty:
+
+| Wariant | Pobiera | Jak działa |
+|:--|:--:|:--|
+| **Zarejestruj i pobierz od razu starszą wersję** | ~12 GB | Steam tworzy wpis instalacji, pobieranie bazowe zostaje natychmiast wstrzymane, a jego pozostałości usunięte. Na dysk trafia wyłącznie wybrana kompilacja |
+| **Zainstaluj pełną wersję bieżącą, potem ją cofnij** | ~24 GB | Klient Steam pobiera całość, program pokazuje jego postęp, po czym wykonuje podmianę |
+
+Wariant oszczędny wynika z prostej obserwacji: z wersji bazowej potrzebny jest
+wyłącznie **wpis `appmanifest`**, a Steam zapisuje go w chwili zakolejkowania
+pobierania — na długo przed ściągnięciem pierwszego gigabajta. Pobieranie 12 GB
+wersji bieżącej tylko po to, aby za chwilę zastąpić ją inną, jest zbędne.
+
+Postęp instalacji bazowej odczytywany jest z pól `BytesDownloaded`
+i `BytesToDownload` w appmanifest, więc pasek postępu działa również dla
+pobierania prowadzonego przez samego Steam.
+
 ## Funkcje
 
 | Pozycja menu | Opis |
 |:--|:--|
-| **Zainstaluj starszą wersję** | Pobranie kompilacji i podmiana plików wraz z kopią zapasową |
+| **Zainstaluj starszą wersję** | Pobranie kompilacji i podmiana plików wraz z kopią zapasową. Gdy gry nie ma — najpierw jej rejestracja w Steam |
 | **Napraw przycisk „Graj”** | Ponowne zapisanie metadanych, gdy Steam zaplanował aktualizację |
 | **Przywróć wersję z kopii zapasowej** | Powrót do stanu sprzed operacji |
 | **Kopie zapasowe** | Przegląd i usuwanie kopii w celu zwolnienia miejsca |
@@ -132,9 +156,10 @@ z datami: [SteamDB — depot 1961461](https://steamdb.info/depot/1961461/manifes
 
 - Windows 10 lub 11
 - Windows PowerShell 5.1 (element systemu) albo PowerShell 7
-- Konto Steam z grą w bibliotece — gra jest darmowa, wystarczy ją dodać
-- Gra zainstalowana przez klienta Steam, aby istniał plik `appmanifest`
+- Konto Steam — gra jest darmowa, a program sam poprowadzi przez dodanie jej do konta
 - Około 14 GB wolnego miejsca (pobranie plus kopia zapasowa)
+
+Gra nie musi być wcześniej zainstalowana — patrz [sekcja powyżej](#gdy-gra-nie-jest-zainstalowana).
 
 ## Logowanie
 

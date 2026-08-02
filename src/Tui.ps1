@@ -226,6 +226,20 @@ function Format-Skrot {
 
 # --- Elementy interaktywne -------------------------------------------------
 
+function Test-Escape {
+    <#
+        Bezpieczne sprawdzenie, czy naciśnięto Esc. Console.KeyAvailable rzuca
+        wyjątkiem, gdy wejście konsoli jest przekierowane (uruchomienie z potoku,
+        zadanie w tle, przechwycone stdin), dlatego całość jest osłonięta.
+    #>
+    try {
+        if ([Console]::KeyAvailable) {
+            return ([Console]::ReadKey($true).Key -eq 'Escape')
+        }
+    } catch { }
+    return $false
+}
+
 function Show-Menu {
     <#
         Pozycje: tablica obiektów z polami Etykieta oraz (opcjonalnie) Opis.

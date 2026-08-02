@@ -19,6 +19,50 @@ Dla PROJECT: PLAYTIME:
 | Depot ID | `1961461` |
 | Rozmiar | około 12 GB |
 
+## Po co w ogóle wersja bazowa
+
+Sam pobrany depot to komplet plików gry — do uruchomienia niczego więcej nie brakuje.
+Klient Steam wymaga jednak, aby gra miała **wpis `appmanifest_1961460.acf`**
+w katalogu `steamapps`. Bez niego pozycja nie pojawi się w bibliotece, przycisk
+„Graj” nie istnieje, a katalog w `steamapps\common` jest dla Steam niewidoczny.
+
+Wpis powstaje wyłącznie po stronie klienta, w chwili **zakolejkowania pobierania** —
+nie po jego zakończeniu. Steam zapisuje wtedy `appid`, `installdir`, `StateFlags`
+oraz pola postępu i dopiero zaczyna ściągać dane. To pozwala rozdzielić dwie rzeczy,
+które zwykle idą w parze:
+
+| Potrzebne | Kosztuje |
+|:--|:--|
+| wpis `appmanifest` | zero bajtów transferu |
+| pliki wersji bieżącej | około 12 GB |
+
+Skoro pliki wersji bieżącej i tak zostaną zastąpione starszą kompilacją, ich
+pobieranie jest czystą stratą. Program otwiera więc `steam://install/1961460`,
+czeka aż wpis się pojawi, zamyka klienta (co przerywa transfer), usuwa zawartość
+`steamapps\downloading\1961460` i przechodzi do pobierania właściwej kompilacji.
+Łącznie na dysk trafia około 12 GB zamiast 24 GB.
+
+Wariant pełny pozostaje dostępny dla osób, które wolą, aby wszystko przebiegło
+konwencjonalnie. Jego postęp odczytywany jest z pól `BytesDownloaded`
+i `BytesToDownload` w appmanifest, aktualizowanych przez klienta na bieżąco.
+
+### StateFlags jako pole bitowe
+
+O kompletności instalacji decyduje bit o wartości `4` (`StateFullyInstalled`).
+Wpis utworzony przez zakolejkowanie pobierania ma typowo `1026`, czyli
+„wymagana aktualizacja”, i bitu tego nie zawiera. Sprawdzenie musi więc być
+maskowaniem (`$flagi -band 4`), a nie porównaniem do liczby — `6` również oznacza
+instalację kompletną.
+
+Rozróżnienie ma praktyczne znaczenie: przed podmianą program tworzy kopię
+zapasową katalogu gry, ale robi to **wyłącznie dla kompletnej instalacji**.
+Archiwizowanie kilkunastu gigabajtów szczątków po przerwanym pobieraniu nie
+miałoby wartości, więc taki katalog jest usuwany, a zwolnione miejsce raportowane.
+
+Osobny przypadek: po odinstalowaniu gry Steam usuwa wpis, lecz potrafi zostawić
+katalog z plikami. Taki osierocony katalog jest wykrywany, jego rozmiar
+raportowany, a zawartość zastępowana.
+
 ## Dlaczego przycisk „Graj" zwykle psuje downgrade
 
 Po podmianie plików katalog gry zawiera starą zawartość, ale plik

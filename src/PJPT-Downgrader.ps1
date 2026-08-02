@@ -21,13 +21,17 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v1.0.0'
+$Wersja  = 'v1.1.0'
 $AppId   = 1961460
 $DepotId = 1961461
 
 # Ostatnia publiczna aktualizacja gry: 30 października 2023 (build 12576441).
 # Wartość służy jako zapas, gdy API steamcmd jest niedostępne.
 $BuildIdZapasowy = '12576441'
+
+# Nazwa katalogu w steamapps\common nie odpowiada tytułowi gry. Zwykle odczytywana
+# jest z wpisu installdir, ta wartość służy wyłącznie jako zabezpieczenie.
+$InstallDirZapasowy = 'Poppy Playtime - Multiplayer'
 
 $Katalogi = @{
     Narzedzia = [System.IO.Path]::Combine($PSScriptRoot, '..', 'tools')
@@ -80,7 +84,7 @@ function Show-Diagnostyka {
 
     $kroki = New-ListaKrokow @(
         'Klient Steam',
-        'Biblioteka z grą',
+        'Wpis instalacji gry',
         'Katalog instalacyjny',
         'Aktualna kompilacja na Steam',
         'Wolne miejsce na dysku'
@@ -94,29 +98,38 @@ function Show-Diagnostyka {
         $kroki[$i].Detal = $detal
         Draw-Kroki -Kroki $kroki -Y $y
     }
+    $pauza = {
+        Write-Wiersz 2 ($y + $kroki.Count + 2) (Format-Barwa 'Naciśnij dowolny klawisz…' 'Przygas')
+        [void][Console]::ReadKey($true)
+    }
 
     & $ustaw 0 'trwa' ''
     $info = Get-InfoGry -AppId $AppId
 
     if (-not $info.SteamPath) {
         & $ustaw 0 'blad' 'nie znaleziono w rejestrze'
+        & $pauza
         return $info
     }
     & $ustaw 0 'gotowe' $info.SteamPath
 
+    # Brak wpisu ani katalogu nie jest błędem - program potrafi doprowadzić
+    # instalację do stanu wymaganego do podmiany wersji.
     & $ustaw 1 'trwa' ''
-    if (-not $info.Biblioteka) {
-        & $ustaw 1 'blad' "brak appmanifest_$AppId.acf"
-        return $info
+    if ($info.Wpis) {
+        & $ustaw 1 'gotowe' $info.Biblioteka
+    } else {
+        & $ustaw 1 'pominiete' 'gra nie jest zainstalowana'
     }
-    & $ustaw 1 'gotowe' $info.Biblioteka
 
     & $ustaw 2 'trwa' ''
-    if (-not $info.Zainstalowana) {
-        & $ustaw 2 'blad' 'katalog gry nie istnieje'
-        return $info
+    if ($info.Zainstalowana -and $info.PelnaInstalacja) {
+        & $ustaw 2 'gotowe' $info.InstallDir
+    } elseif ($info.Zainstalowana) {
+        & $ustaw 2 'pominiete' "$($info.InstallDir) · instalacja niekompletna"
+    } else {
+        & $ustaw 2 'pominiete' 'zostanie przygotowany przy instalacji'
     }
-    & $ustaw 2 'gotowe' $info.InstallDir
 
     & $ustaw 3 'trwa' 'odpytywanie api.steamcmd.net'
     $info.BuildIdZdalny = Get-AktualnyBuildId -AppId $AppId
@@ -137,10 +150,9 @@ function Show-Diagnostyka {
         & $ustaw 4 'gotowe' "$($info.WolneGB) GB"
     }
 
-    Zapisz-Dziennik "Steam: $($info.SteamPath) | biblioteka: $($info.Biblioteka) | installdir: $($info.InstallDir) | build lokalny: $($info.BuildIdLokalny) | build zdalny: $($info.BuildIdZdalny)"
+    Zapisz-Dziennik "Steam: $($info.SteamPath) | biblioteka: $($info.Biblioteka) | installdir: $($info.InstallDir) | pełna: $($info.PelnaInstalacja) | build lokalny: $($info.BuildIdLokalny) | build zdalny: $($info.BuildIdZdalny)"
 
-    Write-Wiersz 2 ($y + $kroki.Count + 2) (Format-Barwa 'Naciśnij dowolny klawisz…' 'Przygas')
-    [void][Console]::ReadKey($true)
+    & $pauza
     return $info
 }
 
@@ -371,10 +383,21 @@ function Install-Kompilacja {
     }
     & $ustaw 0 'gotowe' ''
 
-    # 2
+    # 2 — kopia ma sens wyłącznie dla kompletnej instalacji; szczątki po przerwanym
+    #     pobieraniu tylko zajęłyby kilkanaście gigabajtów bez żadnej wartości
     & $ustaw 1 'trwa' ''
     $kopia = $null
-    if ([System.IO.Directory]::Exists($Info.KatalogGry)) {
+    if (-not [System.IO.Directory]::Exists($Info.KatalogGry)) {
+        & $ustaw 1 'pominiete' 'brak istniejącej instalacji'
+    } elseif (-not $Info.PelnaInstalacja) {
+        try {
+            $szczatki = Get-RozmiarKatalogu -Sciezka $Info.KatalogGry
+            Remove-Item -LiteralPath $Info.KatalogGry -Recurse -Force -ErrorAction SilentlyContinue
+            & $ustaw 1 'pominiete' "niekompletna instalacja — usunięto $(Format-Bajty $szczatki)"
+        } catch {
+            & $ustaw 1 'pominiete' 'niekompletna instalacja'
+        }
+    } else {
         $kopia = "$($Info.KatalogGry).backup_$(Get-Date -Format 'yyyyMMdd-HHmmss')"
         try {
             [System.IO.Directory]::Move($Info.KatalogGry, $kopia)
@@ -385,8 +408,6 @@ function Install-Kompilacja {
                            -Tytul 'Przerwano' -Barwa 'Czerwony'
             return $null
         }
-    } else {
-        & $ustaw 1 'pominiete' 'brak istniejącej instalacji'
     }
 
     # 3 — przeniesienie w obrębie tego samego wolumenu jest natychmiastowe
@@ -626,16 +647,201 @@ function Invoke-ZarzadzanieKopiami {
     }
 }
 
+# --- Przygotowanie gry, gdy nie ma jej w bibliotece -------------------------
+
+function Show-PostepSteam {
+    <#
+        Rysuje postęp pobierania realizowanego przez klienta Steam. Dane pochodzą
+        z appmanifest, który klient aktualizuje na bieżąco.
+    #>
+    param([Parameter(Mandatory)][string]$Acf)
+
+    $szer = Get-SzerokoscEkranu
+    Clear-Ekran
+    Draw-Naglowek -Podtytul 'Instalacja wersji bazowej przez Steam' -Wersja $Wersja
+
+    Write-Wiersz 2 5 (Format-Barwa 'Pobieranie prowadzi klient Steam. Okno można zminimalizować.' 'Bialy')
+    Write-Wiersz 2 6 (Format-Barwa 'Esc przerywa oczekiwanie i wraca do menu (pobieranie trwa dalej).' 'Przygas')
+
+    $yPasek = 9
+    $yStat  = 11
+    $klatka = 0
+    $start  = Get-Date
+
+    while ($true) {
+        $stan = Get-PostepInstalacjiSteam -Acf $Acf
+        if ($stan.Gotowe) { return $true }
+
+        Draw-Pasek -X 2 -Y $yPasek -Szerokosc ($szer - 14) -Procent $stan.Procent
+        Write-Wiersz ($szer - 11) $yPasek (Format-Barwa ('{0,6:N2} %' -f $stan.Procent) 'Bialy')
+
+        $rozmiar = Format-Bajty $stan.Bajty
+        if ($stan.Calosc -gt 0) { $rozmiar += ' / ' + (Format-Bajty $stan.Calosc) }
+
+        Clear-Wiersz $yStat $szer
+        Write-Wiersz 4 $yStat (
+            (Format-Barwa 'Pobrano   ' 'Przygas') + (Format-Barwa ('{0,-24}' -f $rozmiar) 'Bialy') +
+            (Format-Barwa 'Czas  ' 'Przygas') + (Format-Barwa (Format-Czas ((Get-Date) - $start).TotalSeconds) 'Bialy'))
+
+        Clear-Wiersz ($yStat + 2) $szer
+        Write-Wiersz 2 ($yStat + 2) (
+            (Format-Barwa " $(Get-Spinner $klatka) " 'Czerwony') +
+            (Format-Barwa "StateFlags $($stan.StateFlags) — oczekiwanie na stan „w pełni zainstalowana”" 'Blekit'))
+
+        if (Test-Escape) { return $false }
+        $klatka++
+        Start-Sleep -Milliseconds 400
+    }
+}
+
+function Invoke-PrzygotowanieGry {
+    <#
+        Doprowadza system do stanu, w którym możliwa jest podmiana wersji:
+        gra musi mieć wpis appmanifest oraz katalog w bibliotece Steam.
+        Zwraca zaktualizowany obiekt informacji albo $null przy rezygnacji.
+    #>
+    param([Parameter(Mandatory)][object]$Info)
+
+    $opcje = @(
+        [pscustomobject]@{
+            Etykieta = 'Zarejestruj grę i pobierz od razu starszą wersję'
+            Opis     = 'Zalecane. Na dysk trafia tylko wybrana kompilacja — około 12 GB.'
+        }
+        [pscustomobject]@{
+            Etykieta = 'Zainstaluj pełną wersję bieżącą, potem cofnij ją do starszej'
+            Opis     = 'Bez skrótów, ale pobiera dwukrotnie — około 24 GB.'
+        }
+    )
+
+    $wybor = Show-Menu -Pozycje $opcje -Tytul 'Gra nie jest zainstalowana' `
+                       -Podtytul 'PROJECT: PLAYTIME jest darmowe — wystarczy dodać je do konta' -Wersja $Wersja
+    if ($wybor -lt 0) { return $null }
+    $trybOszczedny = ($wybor -eq 0)
+
+    Clear-Ekran
+    Draw-Naglowek -Podtytul 'Przygotowanie gry' -Wersja $Wersja
+
+    $kroki = New-ListaKrokow @(
+        'Uruchomienie klienta Steam',
+        'Otwarcie okna instalacji',
+        'Oczekiwanie na wpis instalacji',
+        'Pobranie wersji bazowej'
+    )
+    $y = 6
+    Draw-Kroki -Kroki $kroki -Y $y
+    $ustaw = { param($i, $s, $d) $kroki[$i].Stan = $s; $kroki[$i].Detal = $d; Draw-Kroki -Kroki $kroki -Y $y }
+
+    # 1
+    & $ustaw 0 'trwa' ''
+    if (-not (Start-SteamKlient -SteamPath $Info.SteamPath)) {
+        & $ustaw 0 'blad' 'nie udało się uruchomić'
+        Show-Komunikat -Wiersze @('Nie udało się uruchomić klienta Steam.',
+                                  'Uruchom go ręcznie i spróbuj ponownie.') -Tytul 'Przerwano' -Barwa 'Czerwony'
+        return $null
+    }
+    & $ustaw 0 'gotowe' ''
+
+    # 2
+    & $ustaw 1 'trwa' ''
+    if (-not (Request-InstalacjaGry -AppId $AppId)) {
+        & $ustaw 1 'blad' 'protokół steam:// niedostępny'
+        Show-Komunikat -Wiersze @('Nie udało się otworzyć okna instalacji.', '',
+                                  'Dodaj grę ręcznie ze sklepu Steam, a następnie',
+                                  'uruchom program ponownie.') -Tytul 'Przerwano' -Barwa 'Czerwony'
+        return $null
+    }
+    & $ustaw 1 'gotowe' "steam://install/$AppId"
+
+    # 3
+    & $ustaw 2 'trwa' 'potwierdź instalację w oknie Steam'
+    $yPodpowiedz = $y + $kroki.Count + 2
+    Write-Wiersz 2 $yPodpowiedz (Format-Barwa 'W oknie klienta Steam wybierz dysk i kliknij „Instaluj”.' 'Bialy')
+    Write-Wiersz 2 ($yPodpowiedz + 1) (Format-Barwa 'Esc anuluje oczekiwanie.' 'Przygas')
+
+    # licznik w zasięgu skryptu: inkrementacja wewnątrz scriptblocka utworzyłaby
+    # kopię lokalną i animacja stałaby w miejscu
+    $script:KlatkaOczekiwania = 0
+    $biblioteka = Wait-Appmanifest -SteamPath $Info.SteamPath -AppId $AppId -Tick {
+        $kroki[2].Detal = "potwierdź instalację w oknie Steam  $(Get-Spinner $script:KlatkaOczekiwania)"
+        Draw-Kroki -Kroki $kroki -Y $y
+        $script:KlatkaOczekiwania++
+    }
+
+    Clear-Wiersz $yPodpowiedz
+    Clear-Wiersz ($yPodpowiedz + 1)
+
+    if ($biblioteka -eq 'anulowano') { & $ustaw 2 'blad' 'anulowano'; return $null }
+    if (-not $biblioteka) {
+        & $ustaw 2 'blad' 'przekroczono czas oczekiwania'
+        Show-Komunikat -Wiersze @('Wpis instalacji się nie pojawił.', '',
+                                  'Upewnij się, że instalacja została potwierdzona w oknie Steam,',
+                                  'a następnie uruchom program ponownie.') -Tytul 'Przerwano' -Barwa 'Zolty'
+        return $null
+    }
+    & $ustaw 2 'gotowe' $biblioteka
+
+    $acf = [System.IO.Path]::Combine($biblioteka, 'steamapps', "appmanifest_$AppId.acf")
+
+    # 4
+    if ($trybOszczedny) {
+        & $ustaw 3 'trwa' 'wstrzymywanie pobierania bazowego'
+
+        if (-not (Stop-Steam -SteamPath $Info.SteamPath)) {
+            & $ustaw 3 'blad' 'klient nadal działa'
+            Show-Komunikat -Wiersze @('Nie udało się zamknąć klienta Steam.',
+                                      'Zamknij go ręcznie i uruchom instalację ponownie.') -Tytul 'Przerwano' -Barwa 'Czerwony'
+            return $null
+        }
+
+        $zwolnione = Remove-CzesciowePobieranie -Biblioteka $biblioteka -AppId $AppId
+
+        # katalog docelowy musi istnieć, aby podmiana miała gdzie trafić
+        $installdir = Get-WpisAcf -Sciezka $acf -Klucz 'installdir'
+        if (-not $installdir) {
+            $installdir = $InstallDirZapasowy
+            Set-WpisAcf -Sciezka $acf -Klucz 'installdir' -Wartosc $installdir | Out-Null
+        }
+        $katalog = [System.IO.Path]::Combine($biblioteka, 'steamapps', 'common', $installdir)
+
+        # Po odinstalowaniu gry Steam potrafi zostawić katalog z plikami, mimo że
+        # usunie wpis appmanifest. Takie pliki i tak zostaną zastąpione.
+        $osierocone = 0L
+        if ([System.IO.Directory]::Exists($katalog)) { $osierocone = Get-RozmiarKatalogu -Sciezka $katalog }
+        New-Item -ItemType Directory -Force -Path $katalog | Out-Null
+
+        $detal = "pominięto, zwolniono $(Format-Bajty $zwolnione)"
+        if ($osierocone -gt 0) { $detal += ", zastanych plików $(Format-Bajty $osierocone)" }
+        & $ustaw 3 'pominiete' $detal
+        Zapisz-Dziennik "Tryb oszczędny: wpis w $biblioteka, installdir=$installdir, zwolniono $zwolnione B, zastane $osierocone B"
+    } else {
+        & $ustaw 3 'trwa' 'pobieranie prowadzi klient Steam'
+        Start-Sleep -Milliseconds 800
+
+        if (-not (Show-PostepSteam -Acf $acf)) {
+            Show-Komunikat -Wiersze @('Oczekiwanie przerwane.', '',
+                                      'Gdy Steam zakończy pobieranie, uruchom instalację ponownie.') `
+                           -Tytul 'Przerwano' -Barwa 'Zolty'
+            return $null
+        }
+
+        Clear-Ekran
+        Draw-Naglowek -Podtytul 'Przygotowanie gry' -Wersja $Wersja
+        & $ustaw 3 'gotowe' 'wersja bazowa zainstalowana'
+        Zapisz-Dziennik 'Tryb pełny: klient Steam ukończył instalację wersji bazowej'
+    }
+
+    Start-Sleep -Milliseconds 600
+    return (Get-InfoGry -AppId $AppId)
+}
+
 # --- Główny przebieg instalacji --------------------------------------------
 
 function Invoke-PelnaInstalacja {
     param([Parameter(Mandatory)][object]$Info)
 
     if (-not $Info.Zainstalowana) {
-        Show-Komunikat -Wiersze @('Gra nie jest zainstalowana przez klienta Steam.', '',
-                                  'Zainstaluj PROJECT: PLAYTIME normalnie (gra jest darmowa),',
-                                  'a następnie uruchom program ponownie.') -Tytul 'Wymagana instalacja' -Barwa 'Zolty'
-        return
+        $Info = Invoke-PrzygotowanieGry -Info $Info
+        if (-not $Info -or -not $Info.Zainstalowana) { return }
     }
 
     $kompilacja = Select-Kompilacja
@@ -715,14 +921,19 @@ function Start-Aplikacja {
         $info = Show-Diagnostyka
 
         while ($true) {
-            if ($info.Zainstalowana) {
+            if ($info.Zainstalowana -and $info.PelnaInstalacja) {
                 $podtytul = "$($info.InstallDir)  ·  build $($info.BuildIdLokalny)  ·  $($info.WolneGB) GB wolne"
+                $opisInstalacji = 'Pobranie wybranej kompilacji i podmiana plików gry'
+            } elseif ($info.Wpis) {
+                $podtytul = "$($info.InstallDir)  ·  instalacja niekompletna  ·  $($info.WolneGB) GB wolne"
+                $opisInstalacji = 'Dokończenie instalacji od razu w wybranej starszej wersji'
             } else {
-                $podtytul = 'Gra nie została wykryta w bibliotece Steam'
+                $podtytul = "Gra nie jest zainstalowana  ·  $($info.WolneGB) GB wolne"
+                $opisInstalacji = 'Program doda grę do konta i pobierze wybraną kompilację'
             }
 
             $pozycje = @(
-                [pscustomobject]@{ Etykieta = 'Zainstaluj starszą wersję';        Opis = 'Pobranie wybranej kompilacji i podmiana plików gry' }
+                [pscustomobject]@{ Etykieta = 'Zainstaluj starszą wersję';        Opis = $opisInstalacji }
                 [pscustomobject]@{ Etykieta = 'Napraw przycisk „Graj"';           Opis = 'Zapobiega pobieraniu aktualizacji przy uruchamianiu ze Steam' }
                 [pscustomobject]@{ Etykieta = 'Przywróć wersję z kopii zapasowej';Opis = 'Powrót do stanu sprzed instalacji starszej wersji' }
                 [pscustomobject]@{ Etykieta = 'Kopie zapasowe';                   Opis = 'Przegląd i usuwanie kopii w celu zwolnienia miejsca' }

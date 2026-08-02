@@ -134,6 +134,8 @@ function Get-InfoGry {
         Exe            = $null
         WolneGB        = 0
         Zainstalowana  = $false
+        PelnaInstalacja= $false
+        Wpis           = $false
     }
 
     $info.SteamPath = Get-SteamPath
@@ -142,10 +144,12 @@ function Get-InfoGry {
     $info.Biblioteka = Get-BibliotekaGry -SteamPath $info.SteamPath -AppId $AppId
     if (-not $info.Biblioteka) { return $info }
 
+    $info.Wpis           = $true
     $info.Acf            = [System.IO.Path]::Combine($info.Biblioteka, 'steamapps', "appmanifest_$AppId.acf")
     $info.InstallDir     = Get-WpisAcf -Sciezka $info.Acf -Klucz 'installdir'
     $info.BuildIdLokalny = Get-WpisAcf -Sciezka $info.Acf -Klucz 'buildid'
     $info.StateFlags     = Get-WpisAcf -Sciezka $info.Acf -Klucz 'StateFlags'
+    $info.PelnaInstalacja= Test-PelnaInstalacja -StateFlags $info.StateFlags
 
     try { $info.Zablokowany = (Get-Item -LiteralPath $info.Acf -Force).IsReadOnly } catch { }
 
@@ -164,6 +168,127 @@ function Get-InfoGry {
     } catch { }
 
     return $info
+}
+
+function Test-PelnaInstalacja {
+    <#
+        StateFlags to pole bitowe. Bit o wartości 4 (StateFullyInstalled) oznacza
+        kompletną instalację; wpis utworzony przez zakolejkowanie pobierania go nie ma.
+    #>
+    param([string]$StateFlags)
+    $wartosc = 0
+    if ([int]::TryParse($StateFlags, [ref]$wartosc)) { return (($wartosc -band 4) -eq 4) }
+    return $false
+}
+
+function Get-PostepInstalacjiSteam {
+    <#
+        Klient Steam zapisuje w appmanifest bieżący stan pobierania, dzięki czemu
+        można pokazać jego postęp bez odpytywania samego klienta.
+    #>
+    param([Parameter(Mandatory)][string]$Acf)
+
+    $pobrano = Get-WpisAcf -Sciezka $Acf -Klucz 'BytesDownloaded'
+    $calosc  = Get-WpisAcf -Sciezka $Acf -Klucz 'BytesToDownload'
+    $flagi   = Get-WpisAcf -Sciezka $Acf -Klucz 'StateFlags'
+
+    $b = 0L; $c = 0L
+    [void][long]::TryParse($pobrano, [ref]$b)
+    [void][long]::TryParse($calosc,  [ref]$c)
+
+    $procent = 0.0
+    if ($c -gt 0) { $procent = [Math]::Min(100.0, $b * 100.0 / $c) }
+
+    return [pscustomobject]@{
+        Bajty      = $b
+        Calosc     = $c
+        Procent    = $procent
+        StateFlags = $flagi
+        Gotowe     = (Test-PelnaInstalacja -StateFlags $flagi)
+    }
+}
+
+function Start-SteamKlient {
+    param([Parameter(Mandatory)][string]$SteamPath, [int]$LimitSek = 90)
+
+    if (Get-Process -Name 'steam' -ErrorAction SilentlyContinue) { return $true }
+
+    $exe = [System.IO.Path]::Combine($SteamPath, 'steam.exe')
+    if (-not [System.IO.File]::Exists($exe)) { return $false }
+
+    try { Start-Process -FilePath $exe -ErrorAction Stop } catch { return $false }
+
+    $koniec = (Get-Date).AddSeconds($LimitSek)
+    while ((Get-Date) -lt $koniec) {
+        if (Get-Process -Name 'steam' -ErrorAction SilentlyContinue) {
+            Start-Sleep -Seconds 4   # klient potrzebuje chwili na obsługę protokołu steam://
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
+function Request-InstalacjaGry {
+    <#
+        Otwiera w kliencie Steam okno instalacji gry. Dla gier darmowych obejmuje
+        to również dodanie pozycji do biblioteki konta. Potwierdzenie należy
+        do użytkownika - nie jest i nie powinno być automatyzowane.
+    #>
+    param([Parameter(Mandatory)][int]$AppId)
+    try {
+        Start-Process "steam://install/$AppId" -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Wait-Appmanifest {
+    <#
+        Czeka na pojawienie się wpisu instalacji. Steam tworzy go w chwili
+        zakolejkowania pobierania, na długo przed jego zakończeniem.
+        Zwraca ścieżkę biblioteki, $null przy przekroczeniu czasu
+        albo 'anulowano', gdy użytkownik naciśnie Esc.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SteamPath,
+        [Parameter(Mandatory)][int]$AppId,
+        [int]$LimitSek = 900,
+        [scriptblock]$Tick
+    )
+
+    $koniec = (Get-Date).AddSeconds($LimitSek)
+    while ((Get-Date) -lt $koniec) {
+        $biblioteka = Get-BibliotekaGry -SteamPath $SteamPath -AppId $AppId
+        if ($biblioteka) { return $biblioteka }
+
+        if (Test-Escape) { return 'anulowano' }
+        if ($Tick) { & $Tick }
+        Start-Sleep -Milliseconds 200
+    }
+    return $null
+}
+
+function Remove-CzesciowePobieranie {
+    <#
+        Usuwa dane niedokończonego pobierania klienta Steam i zwraca liczbę
+        zwolnionych bajtów.
+    #>
+    param([Parameter(Mandatory)][string]$Biblioteka, [Parameter(Mandatory)][int]$AppId)
+
+    $zwolnione = 0L
+    $sciezki = @(
+        [System.IO.Path]::Combine($Biblioteka, 'steamapps', 'downloading', "$AppId"),
+        [System.IO.Path]::Combine($Biblioteka, 'steamapps', 'temp', "$AppId")
+    )
+    foreach ($s in $sciezki) {
+        if ([System.IO.Directory]::Exists($s)) {
+            $zwolnione += Get-RozmiarKatalogu -Sciezka $s
+            try { Remove-Item -LiteralPath $s -Recurse -Force } catch { }
+        }
+    }
+    return $zwolnione
 }
 
 function Get-ExeGry {
