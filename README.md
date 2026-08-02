@@ -223,7 +223,9 @@ operacji na plikach: **[docs/JAK-TO-DZIALA.md](docs/JAK-TO-DZIALA.md)**.
 
 ---
 
-## Metoda alternatywna — konsola Steam
+## Metody alternatywne
+
+### Konsola klienta Steam
 
 Korzysta z sesji zalogowanego klienta, więc nie wymaga osobnego logowania.
 W zamian nie ma podglądu postępu, a podmianę katalogu trzeba wykonać ręcznie:
@@ -238,12 +240,35 @@ download_depot 1961460 1961461 1265526790874008598
 
 Pliki trafiają do `steamapps\content\app_1961460\depot_1961461`.
 
-> [!WARNING]
-> Ta droga bywa dziś zawodna. Pobranie starego manifestu wymaga kodu
-> `GetManifestRequestCode`, który rotuje co kilka minut, a wydawca lub Valve mogą
-> ograniczyć dostęp do konkretnych kompilacji — konsola zwraca wtedy błąd
-> o braku kodu manifestu. Program w tym repozytorium używa DepotDownloadera
-> właśnie dlatego, że obsługuje ten mechanizm poprawnie.
+### SteamCMD
+
+Oficjalne narzędzie wiersza poleceń Valve obsługuje tę samą komendę:
+
+```
+login <nazwa_konta>
+download_depot 1961460 1961461 1265526790874008598
+```
+
+Dla kompilacji z gałęzi publicznej — a takimi są obie Fazy 2 — działa.
+Potwierdzone ograniczenie dotyczy manifestów, które istniały **wyłącznie na
+gałęziach beta**: `download_depot` zwraca wtedy `Manifest unavailable`
+([zgłoszenie u Valve](https://github.com/valvesoftware/steam-for-linux/issues/12138),
+otwarte od czerwca 2025).
+
+Dlaczego mimo to program korzysta z DepotDownloadera:
+
+| | SteamCMD | DepotDownloader |
+|:--|:--|:--|
+| Osobne logowanie | wymagane | wymagane |
+| Kolizja sesji z klientem Steam | [znany problem, brak kontroli](https://steamcommunity.com/discussions/forum/10/6725643788913804437/) | rozwiązana parametrem `-loginid` |
+| Postęp pobierania | jedna linia na końcu | procent i nazwa pliku na bieżąco |
+| Rozmiar narzędzia | setki MB po samoaktualizacji | 32 MB |
+
+Kluczowe: **SteamCMD nie eliminuje osobnego logowania** — to również niezależny
+klient z własnym `config.vdf`. Kolizja jego sesji z sesją klienta Steam jest
+zgłaszana od lat i nie daje się obejść, bo SteamCMD nie udostępnia odpowiednika
+parametru `-loginid`. Byłby to więc krok wstecz względem tego, co naprawiono
+w wersji 1.1.1.
 
 ---
 
