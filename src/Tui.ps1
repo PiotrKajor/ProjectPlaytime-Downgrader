@@ -226,6 +226,39 @@ function Format-Skrot {
 
 # --- Elementy interaktywne -------------------------------------------------
 
+function Clear-BuforKlawiatury {
+    <#
+        Klawisze naciśnięte w trakcie długiej operacji zostają w kolejce wejściowej.
+        Pierwszy ReadKey skonsumowałby je natychmiast, przez co ekran podsumowania
+        zniknąłby, zanim ktokolwiek zdążyłby go przeczytać.
+    #>
+    try { while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) } } catch { }
+}
+
+function Wait-Klawisz {
+    param([string]$Tekst = 'Naciśnij dowolny klawisz, aby kontynuować…', [int]$Y = -1)
+
+    if ($Y -ge 0) { Write-Wiersz 2 $Y (Format-Barwa $Tekst 'Przygas') }
+    Clear-BuforKlawiatury
+    try { [void][Console]::ReadKey($true) } catch { Start-Sleep -Seconds 2 }
+}
+
+function Set-TytulOkna {
+    <# Tytuł okna jest widoczny na pasku zadań także wtedy, gdy okno jest zminimalizowane. #>
+    param([string]$Tekst)
+    try { $Host.UI.RawUI.WindowTitle = $Tekst } catch { }
+}
+
+function Invoke-Sygnal {
+    <# Krótki sygnał dźwiękowy - pobieranie trwa na tyle długo, że użytkownik
+       zdąży odejść od komputera. #>
+    param([switch]$Blad)
+    try {
+        if ($Blad) { [Console]::Beep(392, 200); [Console]::Beep(262, 350) }
+        else       { [Console]::Beep(659, 120); [Console]::Beep(880, 200) }
+    } catch { }
+}
+
 function Test-Escape {
     <#
         Bezpieczne sprawdzenie, czy naciśnięto Esc. Console.KeyAvailable rzuca
@@ -334,6 +367,7 @@ function Show-Komunikat {
 
     if (-not $BezOczekiwania) {
         Write-Wiersz 4 ($y + $wys) (Format-Barwa 'Naciśnij dowolny klawisz, aby kontynuować…' 'Przygas')
+        Clear-BuforKlawiatury
         [void][Console]::ReadKey($true)
     }
 }

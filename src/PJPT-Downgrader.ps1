@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v1.2.0'
+$Wersja  = 'v1.3.0'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -98,10 +98,7 @@ function Show-Diagnostyka {
         $kroki[$i].Detal = $detal
         Draw-Kroki -Kroki $kroki -Y $y
     }
-    $pauza = {
-        Write-Wiersz 2 ($y + $kroki.Count + 2) (Format-Barwa 'Naciśnij dowolny klawisz…' 'Przygas')
-        [void][Console]::ReadKey($true)
-    }
+    $pauza = { Wait-Klawisz -Tekst 'Naciśnij dowolny klawisz…' -Y ($y + $kroki.Count + 2) }
 
     & $ustaw 0 'trwa' ''
     $info = Get-InfoGry -AppId $AppId
@@ -307,6 +304,18 @@ function Invoke-Logowanie {
                 $uzytkownik = $kandydaci[$w]
                 $qr = $false
             }
+        } else {
+            # Ostatnia deska ratunku przed trybem tekstowym: nazwę konta użytkownik zna,
+            # a token jest już zapisany, więc jej podanie wystarczy do pełnego interfejsu.
+            Clear-Ekran
+            Draw-Naglowek -Podtytul 'Nazwa konta' -Wersja $Wersja
+            Write-Wiersz 2 5 (Format-Barwa 'Logowanie powiodło się, ale nie udało się odczytać nazwy konta.' 'Bialy')
+            Write-Wiersz 2 6 (Format-Barwa 'Podanie jej pozwoli pokazać pasek postępu zamiast surowego tekstu.' 'Przygas')
+            Write-Wiersz 2 7 (Format-Barwa 'Pominięcie (Enter) uruchomi pobieranie w trybie tekstowym.' 'Przygas')
+
+            $wpis = (Read-Pole -Etykieta 'Nazwa konta Steam').Trim()
+            if ($wpis) { $uzytkownik = $wpis; $qr = $false }
+            [Console]::CursorVisible = $false
         }
     }
 
@@ -398,6 +407,12 @@ function Show-Pobieranie {
                 }
             }
 
+            # tytuł okna aktualizowany raz na sekundę - postęp widać na pasku zadań
+            # także wtedy, gdy okno jest zminimalizowane
+            if ($klatka % 8 -eq 0) {
+                Set-TytulOkna ('{0:N1}%  ·  {1}/s  ·  PROJECT: PLAYTIME Downgrader' -f $stan.Procent, (Format-Bajty $stan.Predkosc))
+            }
+
             if ($stan.Blad) { break }
 
             $klatka++
@@ -412,11 +427,15 @@ function Show-Pobieranie {
     Zapisz-Dziennik "Pobieranie zakończone: kod $($stan.KodWyjscia), $(Format-Bajty $stan.Bajty)"
 
     if ($stan.Blad) {
+        Set-TytulOkna 'PRZERWANO · PROJECT: PLAYTIME Downgrader'
+        Invoke-Sygnal -Blad
         Show-Komunikat -Wiersze @($stan.Blad, '', 'Uruchom logowanie ponownie z poziomu menu głównego.') `
                        -Tytul 'Przerwano' -Barwa 'Czerwony'
         return $false
     }
     if ($stan.KodWyjscia -ne 0) {
+        Set-TytulOkna 'BŁĄD · PROJECT: PLAYTIME Downgrader'
+        Invoke-Sygnal -Blad
         $ogon = @($stan.Dziennik | Select-Object -Last 6)
         Show-Komunikat -Wiersze (@("DepotDownloader zakończył pracę z kodem $($stan.KodWyjscia).", '') + $ogon) `
                        -Tytul 'Błąd pobierania' -Barwa 'Czerwony'
@@ -542,39 +561,59 @@ function Install-Kompilacja {
 function Show-Podsumowanie {
     param([Parameter(Mandatory)][object]$Wynik, [Parameter(Mandatory)][object]$Kompilacja)
 
+    Set-TytulOkna 'GOTOWE · PROJECT: PLAYTIME Downgrader'
+    Invoke-Sygnal
+
     Clear-Ekran
-    Draw-Naglowek -Podtytul 'Gotowe' -Wersja $Wersja
+    Draw-Naglowek -Podtytul 'Instalacja zakończona' -Wersja $Wersja
     $szer = Get-SzerokoscEkranu
 
     $y = 5
-    Write-Wiersz 2 $y (Format-Barwa '  Instalacja zakończona pomyślnie' 'Zielony'); $y += 2
+    Write-Wiersz 2 $y (Format-Barwa '  ✔  GOTOWE' 'Zielony')
+    Write-Wiersz 13 $y (Format-Barwa '— gra jest gotowa do uruchomienia' 'Bialy')
+    $y += 2
 
-    $pary = @(
-        @('Wersja',       $Kompilacja.Etykieta),
-        @('Manifest',     $Kompilacja.Manifest),
-        @('Kopia zapasowa', $(if ($Wynik.Kopia) { [System.IO.Path]::GetFileName($Wynik.Kopia) } else { 'brak' })),
-        @('Skrót',        $(if ($Wynik.Skrot) { 'utworzony na pulpicie' } else { 'brak' }))
+    # Wykaz tego, co faktycznie zostało zrobione. Bez niego użytkownik po długim
+    # pobieraniu nie ma jak stwierdzić, które kroki się powiodły.
+    $kroki = @(
+        @('✔', "Pobrano kompilację  ·  manifest $($Kompilacja.Manifest)", 'Zielony')
     )
-    foreach ($p in $pary) {
-        Write-Wiersz 4 $y ((Format-Barwa ('{0,-16}' -f $p[0]) 'Przygas') + (Format-Barwa (Format-Skrot $p[1] ($szer - 24)) 'Bialy'))
+    if ($Wynik.Kopia) {
+        $kroki += , @('✔', "Poprzednią wersję zachowano jako $([System.IO.Path]::GetFileName($Wynik.Kopia))", 'Zielony')
+    } else {
+        $kroki += , @('–', 'Kopia zapasowa: brak poprzedniej instalacji do zachowania', 'Szary')
+    }
+    $kroki += , @('✔', 'Pliki gry podmieniono w bibliotece Steam', 'Zielony')
+    # cudzysłowy drukarskie tylko w łańcuchach apostrofowych: PowerShell traktuje
+    # znak ” jako ogranicznik i przerywa na nim łańcuch w cudzysłowach prostych
+    $kroki += , @('✔', 'Przycisk „Graj” skonfigurowany  ·  buildid ' + $Wynik.Build, 'Zielony')
+    if ($Wynik.Skrot) {
+        $kroki += , @('✔', 'Skrót „PROJECT PLAYTIME (starsza wersja)” na pulpicie', 'Zielony')
+    } else {
+        $kroki += , @('–', 'Skrót na pulpicie: nie utworzono', 'Szary')
+    }
+
+    foreach ($k in $kroki) {
+        Write-Wiersz 4 $y ((Format-Barwa "$($k[0])  " $k[2]) + (Format-Barwa (Format-Skrot $k[1] ($szer - 10)) 'Bialy'))
         $y++
     }
     $y++
 
-    Draw-Ramka -X 2 -Y $y -Szerokosc ($szer - 4) -Wysokosc 7 -Tytul 'Przycisk „Graj" w Steam' -Barwa 'Zielony'
+    Write-Wiersz 4 $y (Format-Barwa (Format-Skrot "Zainstalowana wersja: $($Kompilacja.Etykieta)" ($szer - 8)) 'Blekit')
+    $y += 2
+
+    Draw-Ramka -X 2 -Y $y -Szerokosc ($szer - 4) -Wysokosc 6 -Tytul 'Jak uruchomić' -Barwa 'Zielony'
     $tresc = @(
-        'Klient Steam uznaje instalację za aktualną, więc przycisk „Graj"',
-        'uruchamia grę bez pobierania czegokolwiek. Skrót z pulpitu działa tak samo.',
-        '',
-        'Nie używaj opcji „Sprawdź spójność plików gry" - cofa całą operację.'
+        'Naciśnij „Graj” w Steam albo użyj skrótu z pulpitu — działają tak samo.',
+        'Aktualizacja nie zostanie pobrana.',
+        'Nie używaj opcji „Sprawdź spójność plików gry”: cofa całą operację.'
     )
     for ($i = 0; $i -lt $tresc.Count; $i++) {
         Write-Wiersz 4 ($y + 1 + $i) (Format-Barwa (Format-Skrot $tresc[$i] ($szer - 8)) 'Bialy')
     }
 
-    $y += 8
-    Write-Wiersz 2 $y (Format-Barwa 'Naciśnij dowolny klawisz, aby wrócić do menu…' 'Przygas')
-    [void][Console]::ReadKey($true)
+    $y += 7
+    Wait-Klawisz -Tekst 'Naciśnij dowolny klawisz, aby wrócić do menu…' -Y $y
 }
 
 # --- Pozostałe akcje menu --------------------------------------------------
@@ -768,7 +807,11 @@ function Show-PostepSteam {
         Clear-Wiersz ($yStat + 2) $szer
         Write-Wiersz 2 ($yStat + 2) (
             (Format-Barwa " $(Get-Spinner $klatka) " 'Czerwony') +
-            (Format-Barwa "StateFlags $($stan.StateFlags) — oczekiwanie na stan „w pełni zainstalowana”" 'Blekit'))
+            (Format-Barwa ('StateFlags ' + $stan.StateFlags + ' — oczekiwanie na stan „w pełni zainstalowana”') 'Blekit'))
+
+        if ($klatka % 3 -eq 0) {
+            Set-TytulOkna ('Steam: {0:N1}%  ·  PROJECT: PLAYTIME Downgrader' -f $stan.Procent)
+        }
 
         if (Test-Escape) { return $false }
         $klatka++
