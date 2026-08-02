@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="PROJECT: PLAYTIME Downgrader">
+  <defs>
+    <linearGradient id="tlo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#1C0B10"/>
+      <stop offset="55%"  stop-color="#0D0508"/>
+      <stop offset="100%" stop-color="#070A12"/>
+    </linearGradient>
+    <radialGradient id="zarzewie" cx="22%" cy="42%" r="52%">
+      <stop offset="0%"   stop-color="#FF3B41" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#FF3B41" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="chlod" cx="86%" cy="86%" r="48%">
+      <stop offset="0%"   stop-color="#2A6AD4" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#2A6AD4" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="maska" x1="26%" y1="0%" x2="74%" y2="100%">
+      <stop offset="0%"   stop-color="#F45A54"/>
+      <stop offset="42%"  stop-color="#D42E33"/>
+      <stop offset="100%" stop-color="#84131C"/>
+    </linearGradient>
+    <linearGradient id="filtr" x1="18%" y1="0%" x2="82%" y2="100%">
+      <stop offset="0%"   stop-color="#6FB4FF"/>
+      <stop offset="48%"  stop-color="#2A6AD4"/>
+      <stop offset="100%" stop-color="#123A85"/>
+    </linearGradient>
+    <linearGradient id="kanister" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#FFE07A"/>
+      <stop offset="48%"  stop-color="#ECB524"/>
+      <stop offset="100%" stop-color="#A9740A"/>
+    </linearGradient>
+    <radialGradient id="oko" cx="36%" cy="30%" r="82%">
+      <stop offset="0%"   stop-color="#2E1519"/>
+      <stop offset="42%"  stop-color="#100608"/>
+      <stop offset="100%" stop-color="#040102"/>
+    </radialGradient>
+    <filter id="cien" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.65"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#tlo)"/>
+  <rect width="1280" height="640" fill="url(#zarzewie)"/>
+  <rect width="1280" height="640" fill="url(#chlod)"/>
+
+  <g opacity="0.04" fill="#FFD95C">
+    <rect x="-200" y="500" width="1800" height="34" transform="rotate(-13 640 570)"/>
+    <rect x="-200" y="566" width="1800" height="34" transform="rotate(-13 640 570)"/>
+    <rect x="-200" y="632" width="1800" height="34" transform="rotate(-13 640 570)"/>
+  </g>
+
+  <g transform="translate(104 140) scale(0.72)" filter="url(#cien)">
+    <rect x="30"  y="312" width="134" height="84" rx="34" fill="url(#kanister)"/>
+    <rect x="48"  y="330" width="17"  height="48" rx="9"  fill="#FFF6CF" opacity="0.42"/>
+    <rect x="348" y="312" width="134" height="84" rx="34" fill="url(#kanister)"/>
+    <rect x="447" y="330" width="17"  height="48" rx="9"  fill="#FFF6CF" opacity="0.42"/>
+
+    <path d="M256 58 C 358 58 420 128 420 222 C 420 268 409 302 390 332
+             C 373 359 351 380 327 394 C 305 407 282 414 256 414
+             C 230 414 207 407 185 394 C 161 380 139 359 122 332
+             C 103 302 92 268 92 222 C 92 128 154 58 256 58 Z"
+          fill="url(#maska)"/>
+    <path d="M256 84 C 328 84 382 128 396 192 C 358 150 312 130 256 130
+             C 200 130 154 150 116 192 C 130 128 184 84 256 84 Z"
+          fill="#FFFFFF" opacity="0.17"/>
+
+    <circle cx="186" cy="206" r="56" fill="url(#oko)"/>
+    <circle cx="186" cy="206" r="56" fill="none" stroke="#71101A" stroke-width="8" opacity="0.85"/>
+    <circle cx="326" cy="206" r="56" fill="url(#oko)"/>
+    <circle cx="326" cy="206" r="56" fill="none" stroke="#71101A" stroke-width="8" opacity="0.85"/>
+
+    <circle cx="256" cy="378" r="88" fill="#71101A" opacity="0.6"/>
+    <circle cx="256" cy="378" r="80" fill="url(#filtr)"/>
+    <circle cx="256" cy="378" r="60" fill="none" stroke="#0E2F6B" stroke-width="10" opacity="0.7"/>
+    <circle cx="256" cy="378" r="40" fill="none" stroke="#0E2F6B" stroke-width="10" opacity="0.55"/>
+    <path d="M256 342 L256 396 M224 376 L256 408 L288 376" fill="none"
+          stroke="#F2F8FF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g font-family="'Segoe UI', 'Inter', Arial, sans-serif">
+    <text x="546" y="212" font-size="30" font-weight="600" letter-spacing="10.5" fill="#E7767B">PROJECT: PLAYTIME</text>
+    <text x="542" y="318" font-size="92" font-weight="800" letter-spacing="-1.5" fill="#FFFFFF">DOWNGRADER</text>
+    <text x="546" y="372" font-size="24" font-weight="400" fill="#8FA0B4">Faza 2 na dysku — przycisk „Graj” jej nie nadpisuje.</text>
+
+    <g font-size="21" font-weight="600">
+      <rect x="546" y="410" width="200" height="46" rx="23" fill="#D42E33" opacity="0.16"/>
+      <rect x="546" y="410" width="200" height="46" rx="23" fill="none" stroke="#D42E33" stroke-width="1.5" opacity="0.55"/>
+      <text x="646" y="440" fill="#FF8A8E" text-anchor="middle">Interfejs TUI</text>
+
+      <rect x="762" y="410" width="212" height="46" rx="23" fill="#ECB524" opacity="0.14"/>
+      <rect x="762" y="410" width="212" height="46" rx="23" fill="none" stroke="#ECB524" stroke-width="1.5" opacity="0.5"/>
+      <text x="868" y="440" fill="#F5CB57" text-anchor="middle">Plug and play</text>
+
+      <rect x="990" y="410" width="196" height="46" rx="23" fill="#2A6AD4" opacity="0.16"/>
+      <rect x="990" y="410" width="196" height="46" rx="23" fill="none" stroke="#2A6AD4" stroke-width="1.5" opacity="0.55"/>
+      <text x="1088" y="440" fill="#7FB3FF" text-anchor="middle">PowerShell</text>
+    </g>
+  </g>
+
+  <g transform="translate(546 508)">
+    <rect x="0" y="0" width="580" height="14" rx="7" fill="#FFFFFF" opacity="0.09"/>
+    <rect x="0" y="0" width="254" height="14" rx="7" fill="#D42E33"/>
+    <rect x="254" y="0" width="40" height="14" rx="7" fill="#ECB524"/>
+    <text x="606" y="13" font-family="'Cascadia Mono', Consolas, monospace" font-size="18" fill="#8FA0B4">43,72 %</text>
+  </g>
+</svg>
