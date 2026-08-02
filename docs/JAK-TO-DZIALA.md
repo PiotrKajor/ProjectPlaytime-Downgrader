@@ -116,6 +116,37 @@ na dysku i porównuje je z manifestem bieżącej kompilacji. Wykrywa różnicę
 i pobiera wersję aktualną. To jedyna operacja cofająca cały zabieg — dlatego
 program tworzy kopię zapasową i pozwala wrócić do stanu wyjściowego.
 
+## Dlaczego potrzebne jest osobne logowanie
+
+Pytanie pojawia się naturalnie: klient Steam działa i jest zalogowany, więc czemu
+program prosi o dane po raz drugi.
+
+DepotDownloader nie jest wtyczką ani nakładką na klienta. To **niezależna
+implementacja protokołu Steam** oparta na bibliotece SteamKit2, nawiązująca własne
+połączenie z serwerami CM Valve. Sesja klienta Steam jest zaszyfrowana i związana
+z jego procesem — nie ma udokumentowanego mechanizmu jej współdzielenia. Aby
+odszyfrować zawartość depotu, narzędzie musi samo uzyskać klucz depotu, a serwer
+wyda go wyłącznie sesji uwierzytelnionej na koncie z licencją na daną grę.
+
+Okno instalacji otwierane wcześniej przez program to zupełnie inna operacja:
+klient Steam pobiera wtedy wersję bieżącą, aby powstał wpis `appmanifest`.
+Dwa pobierania, dwa różne programy, dwie niezależne sesje.
+
+### Jednorazowość
+
+Parametr `-remember-password` zapisuje token sesji w pliku `account.config`
+w katalogu roboczym narzędzia. Program zapamiętuje dodatkowo nazwę konta, więc
+przy kolejnym uruchomieniu w menu pojawia się pozycja _Kontynuuj jako …_,
+a etap logowania przebiega bez żadnego pytania.
+
+### Kolizja identyfikatorów sesji
+
+Steam przypisuje każdej sesji `LoginID` i **zrywa połączenie, gdy dwie sesje tego
+samego konta zgłoszą identyczną wartość**. Domyślnie DepotDownloader użyłby
+wartości kolidującej z działającym klientem, co wyrzuciłoby użytkownika ze Steam
+w trakcie pobierania. Dlatego każde wywołanie narzędzia otrzymuje jawny
+parametr `-loginid` o stałej, odrębnej wartości.
+
 ## Dlaczego logowanie odbywa się w dwóch krokach
 
 DepotDownloader czyta hasło i kod Steam Guard przez `Console.ReadKey`, czyli

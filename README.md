@@ -6,7 +6,7 @@
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
-![Wersja](https://img.shields.io/badge/wersja-1.1.0-D42E33?style=for-the-badge)
+![Wersja](https://img.shields.io/badge/wersja-1.1.1-D42E33?style=for-the-badge)
 ![Licencja](https://img.shields.io/badge/licencja-MIT-ECB524?style=for-the-badge)
 
 **Instalator starszych kompilacji gry PROJECT: PLAYTIME.**
@@ -23,7 +23,7 @@ Jeden plik do kliknięcia. Zero konfiguracji, zero zależności do zainstalowani
 
 ```
 ════════════════════════════════════════════════════════════════════
-  PROJECT: PLAYTIME  ·  DOWNGRADER                          v1.1.0
+  PROJECT: PLAYTIME  ·  DOWNGRADER                          v1.1.1
 ════════════════════════════════════════════════════════════════════
   Pobieranie zawartości
 
@@ -178,6 +178,28 @@ więc jednocześnie obsłużyć logowania i przechwytywać wyjścia na potrzeby 
 postępu. Tryb z nazwą użytkownika rozdziela oba etapy na dwa uruchomienia,
 tryb QR musi zmieścić się w jednym.
 
+### Skoro klient Steam jest zalogowany, po co drugie logowanie?
+
+DepotDownloader nie jest wtyczką do klienta Steam, tylko **osobnym programem
+z własnym połączeniem** do serwerów Valve (implementacja SteamKit2). Sesja klienta
+jest zaszyfrowana i związana z jego procesem — nie istnieje wspierany sposób jej
+pożyczenia. Aby pobrać wskazaną kompilację, narzędzie musi samodzielnie uzyskać
+klucz depotu, a do tego potrzebuje uwierzytelnienia na koncie posiadającym grę.
+
+Okno instalacji, które pojawia się wcześniej, to zupełnie inna operacja — klient
+Steam pobiera wtedy wersję bieżącą, aby powstał wpis `appmanifest`.
+
+**Logowanie jest jednorazowe.** Token sesji zostaje zapisany
+(`-remember-password`), a nazwa konta zapamiętana, więc przy kolejnych
+uruchomieniach w menu pojawia się pozycja _Kontynuuj jako …_ i hasło nie jest
+już potrzebne. To samo wyjaśnienie dostępne jest w programie pod pozycją
+_Dlaczego to jest wymagane?_.
+
+> [!NOTE]
+> Obie sesje otrzymują różne identyfikatory `LoginID`. Bez tego Steam zerwałby
+> połączenie klienta w chwili zalogowania DepotDownloadera i wyrzucił użytkownika
+> z aplikacji w trakcie pobierania.
+
 ---
 
 ## Struktura repozytorium
@@ -203,7 +225,8 @@ operacji na plikach: **[docs/JAK-TO-DZIALA.md](docs/JAK-TO-DZIALA.md)**.
 
 ## Metoda alternatywna — konsola Steam
 
-Bez narzędzi zewnętrznych. Wolniejsze, bez podglądu postępu i z ręczną podmianą katalogu:
+Korzysta z sesji zalogowanego klienta, więc nie wymaga osobnego logowania.
+W zamian nie ma podglądu postępu, a podmianę katalogu trzeba wykonać ręcznie:
 
 ```
 steam://open/console
@@ -214,6 +237,13 @@ download_depot 1961460 1961461 1265526790874008598
 ```
 
 Pliki trafiają do `steamapps\content\app_1961460\depot_1961461`.
+
+> [!WARNING]
+> Ta droga bywa dziś zawodna. Pobranie starego manifestu wymaga kodu
+> `GetManifestRequestCode`, który rotuje co kilka minut, a wydawca lub Valve mogą
+> ograniczyć dostęp do konkretnych kompilacji — konsola zwraca wtedy błąd
+> o braku kodu manifestu. Program w tym repozytorium używa DepotDownloadera
+> właśnie dlatego, że obsługuje ten mechanizm poprawnie.
 
 ---
 

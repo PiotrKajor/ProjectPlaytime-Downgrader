@@ -2,6 +2,42 @@
 #  Depot.ps1 - pobieranie DepotDownloadera, logowanie i pobieranie zawartości
 # =============================================================================
 
+# Steam zrywa połączenie, gdy dwie sesje tego samego konta zgłoszą identyczny
+# LoginID. Bez jawnej wartości DepotDownloader kolidowałby z działającym
+# klientem Steam i wyrzucał użytkownika z aplikacji w trakcie pobierania.
+$script:LoginId = 1961460
+
+function Get-ZapamietaneKonto {
+    <# Nazwa konta użyta przy ostatnim udanym logowaniu, jeśli została zapisana. #>
+    param([Parameter(Mandatory)][string]$KatalogNarzedzi)
+    $plik = [System.IO.Path]::Combine($KatalogNarzedzi, 'konto.txt')
+    if (-not [System.IO.File]::Exists($plik)) { return $null }
+    try {
+        $wartosc = ([System.IO.File]::ReadAllText($plik)).Trim()
+        if ($wartosc) { return $wartosc }
+    } catch { }
+    return $null
+}
+
+function Set-ZapamietaneKonto {
+    param([Parameter(Mandatory)][string]$KatalogNarzedzi, [string]$Uzytkownik)
+    try {
+        $plik = [System.IO.Path]::Combine($KatalogNarzedzi, 'konto.txt')
+        if ($Uzytkownik) { [System.IO.File]::WriteAllText($plik, $Uzytkownik) }
+        elseif ([System.IO.File]::Exists($plik)) { Remove-Item -LiteralPath $plik -Force }
+    } catch { }
+}
+
+function Test-ZapisanaSesja {
+    <#
+        DepotDownloader przechowuje token sesji w pliku account.config w swoim
+        katalogu roboczym. Jego obecność razem z zapamiętaną nazwą konta oznacza,
+        że kolejne logowanie przebiegnie bez pytania o hasło.
+    #>
+    param([Parameter(Mandatory)][string]$KatalogNarzedzi)
+    return [System.IO.File]::Exists([System.IO.Path]::Combine($KatalogNarzedzi, 'account.config'))
+}
+
 function Get-DepotDownloader {
     <#
         Zwraca ścieżkę do DepotDownloader.exe, pobierając narzędzie z GitHuba,
@@ -80,7 +116,7 @@ function Invoke-LogowanieSteam {
 
     $argumenty = @(
         '-app', $AppId, '-depot', $DepotId, '-manifest', $Manifest,
-        '-dir', $tymczasowy, '-filelist', $pustaLista
+        '-dir', $tymczasowy, '-filelist', $pustaLista, '-loginid', $script:LoginId
     )
     if ($KodQr) {
         $argumenty += '-qr'
@@ -119,7 +155,8 @@ function Start-PobieranieDepotu {
 
     $argumenty = @(
         '-app', $AppId, '-depot', $DepotId, '-manifest', $Manifest,
-        '-dir', "`"$Katalog`"", '-max-downloads', $RownolegleFragmenty
+        '-dir', "`"$Katalog`"", '-max-downloads', $RownolegleFragmenty,
+        '-loginid', $script:LoginId
     )
     if ($Uzytkownik) { $argumenty += @('-username', $Uzytkownik, '-remember-password') }
 

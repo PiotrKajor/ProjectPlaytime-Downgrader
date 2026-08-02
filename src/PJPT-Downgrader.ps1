@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v1.1.0'
+$Wersja  = 'v1.1.1'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -185,25 +185,79 @@ function Select-Kompilacja {
 
 # --- Logowanie -------------------------------------------------------------
 
+function Show-DlaczegoLogowanie {
+    <#
+        Pytanie pojawia się naturalnie: klient Steam jest zalogowany, więc po co
+        drugie logowanie. Ekran wyjaśnia to zamiast zostawiać użytkownika z domysłami.
+    #>
+    $szer = Get-SzerokoscEkranu
+    Clear-Ekran
+    Draw-Naglowek -Podtytul 'Dlaczego wymagane jest logowanie' -Wersja $Wersja
+
+    $tresc = @(
+        'DepotDownloader nie jest wtyczką do klienta Steam, tylko osobnym programem',
+        'z własnym połączeniem do serwerów Valve. Sesja klienta jest zaszyfrowana',
+        'i związana z jego procesem — nie da się jej pożyczyć.',
+        '',
+        'Aby pobrać wskazaną kompilację, narzędzie musi samo uzyskać klucz depotu,',
+        'a do tego potrzebuje uwierzytelnienia na koncie posiadającym grę.',
+        '',
+        'Logowanie jest jednorazowe. Token sesji zostaje zapisany, więc przy',
+        'kolejnych uruchomieniach hasło nie będzie już potrzebne.',
+        '',
+        'Hasło i kod Steam Guard wpisywane są bezpośrednio w oknie DepotDownloadera.',
+        'Ten program ich nie widzi i nigdzie nie zapisuje.'
+    )
+    for ($i = 0; $i -lt $tresc.Count; $i++) {
+        $barwa = 'Bialy'
+        if ($tresc[$i] -like 'Logowanie jest jednorazowe*') { $barwa = 'Zielony' }
+        Write-Wiersz 4 (5 + $i) (Format-Barwa (Format-Skrot $tresc[$i] ($szer - 8)) $barwa)
+    }
+
+    Write-Wiersz 2 (7 + $tresc.Count) (Format-Barwa 'Naciśnij dowolny klawisz…' 'Przygas')
+    [void][Console]::ReadKey($true)
+}
+
 function Invoke-Logowanie {
     param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$ManifestId)
 
-    $metody = @(
-        [pscustomobject]@{ Etykieta = 'Nazwa użytkownika i hasło'; Opis = 'Zalecane. Umożliwia pełny podgląd postępu pobierania.' }
-        [pscustomobject]@{ Etykieta = 'Kod QR w aplikacji Steam';  Opis = 'Bez wpisywania hasła. Postęp w trybie tekstowym.' }
-    )
-    $wybor = Show-Menu -Pozycje $metody -Tytul 'Logowanie do Steam' `
-                       -Podtytul 'Dane trafiają wyłącznie do DepotDownloadera (projekt SteamRE)' -Wersja $Wersja
+    $zapamietane = Get-ZapamietaneKonto -KatalogNarzedzi $Katalogi.Narzedzia
+    $sesja       = Test-ZapisanaSesja  -KatalogNarzedzi $Katalogi.Narzedzia
+
+    $metody = @()
+    if ($zapamietane) {
+        if ($sesja) { $opis = 'Zapisana sesja — hasło nie będzie potrzebne.' }
+        else        { $opis = 'Konto z poprzedniego uruchomienia.' }
+        $metody += [pscustomobject]@{ Etykieta = "Kontynuuj jako $zapamietane"; Opis = $opis }
+    }
+    $metody += [pscustomobject]@{ Etykieta = 'Nazwa użytkownika i hasło'; Opis = 'Pełny podgląd postępu pobierania. Logowanie jednorazowe.' }
+    $metody += [pscustomobject]@{ Etykieta = 'Kod QR w aplikacji Steam';  Opis = 'Bez wpisywania hasła. Postęp w trybie tekstowym.' }
+    $metody += [pscustomobject]@{ Etykieta = 'Dlaczego to jest wymagane?'; Opis = 'Klient Steam jest zalogowany, a mimo to potrzebne jest logowanie' }
+
+    $podtytul = 'Dane trafiają wyłącznie do DepotDownloadera (projekt SteamRE)'
+    $wybor = Show-Menu -Pozycje $metody -Tytul 'Logowanie do Steam' -Podtytul $podtytul -Wersja $Wersja
     if ($wybor -lt 0) { return $null }
 
-    $qr = ($wybor -eq 1)
+    # przesunięcie indeksów, gdy pierwsza pozycja to zapamiętane konto
+    $przesuniecie = 0
+    if ($zapamietane) { $przesuniecie = 1 }
+
+    if ($wybor -eq ($metody.Count - 1)) {
+        Show-DlaczegoLogowanie
+        return (Invoke-Logowanie -Exe $Exe -ManifestId $ManifestId)
+    }
+
+    $qr = ($wybor -eq ($przesuniecie + 1))
     $uzytkownik = $null
 
-    if (-not $qr) {
+    if ($zapamietane -and $wybor -eq 0) {
+        $uzytkownik = $zapamietane
+    } elseif (-not $qr) {
         Clear-Ekran
         Draw-Naglowek -Podtytul 'Logowanie do Steam' -Wersja $Wersja
         Write-Wiersz 2 5 (Format-Barwa 'Hasło i kod Steam Guard zostaną podane w oknie DepotDownloadera.' 'Bialy')
         Write-Wiersz 2 6 (Format-Barwa 'Ten skrypt nigdy ich nie widzi ani nie zapisuje.' 'Przygas')
+        Write-Wiersz 2 7 (Format-Barwa 'Logowanie jednorazowe — token sesji zostanie zapamiętany.' 'Zielony')
         $uzytkownik = (Read-Pole -Etykieta 'Nazwa konta Steam').Trim()
         if (-not $uzytkownik) { return $null }
     }
@@ -229,6 +283,8 @@ function Invoke-Logowanie {
         Read-Host '  Naciśnij Enter, aby wrócić do menu'
         return $null
     }
+
+    if ($uzytkownik) { Set-ZapamietaneKonto -KatalogNarzedzi $Katalogi.Narzedzia -Uzytkownik $uzytkownik }
 
     [Console]::CursorVisible = $false
     return [pscustomobject]@{ Uzytkownik = $uzytkownik; Qr = $qr }
@@ -888,7 +944,7 @@ function Invoke-PelnaInstalacja {
         Write-Host ''
         Push-Location ([System.IO.Path]::GetDirectoryName($exe))
         try {
-            & $exe -app $AppId -depot $DepotId -manifest $kompilacja.Manifest -dir $katalogRoboczy -qr
+            & $exe -app $AppId -depot $DepotId -manifest $kompilacja.Manifest -dir $katalogRoboczy -qr -loginid $script:LoginId
             $kod = $LASTEXITCODE
         } finally { Pop-Location }
         [Console]::CursorVisible = $false
