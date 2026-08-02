@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v1.1.1'
+$Wersja  = 'v1.1.2'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -942,11 +942,14 @@ function Invoke-PelnaInstalacja {
         Write-Host ''
         Write-Host '  Pobieranie w trybie tekstowym (logowanie kodem QR).' -ForegroundColor Cyan
         Write-Host ''
-        Push-Location ([System.IO.Path]::GetDirectoryName($exe))
-        try {
-            & $exe -app $AppId -depot $DepotId -manifest $kompilacja.Manifest -dir $katalogRoboczy -qr -loginid $script:LoginId
-            $kod = $LASTEXITCODE
-        } finally { Pop-Location }
+        # ta sama zasada co przy logowaniu: kod QR musi trafić na konsolę,
+        # a nie do przechwyconego strumienia sukcesu
+        $argQr = @('-app', $AppId, '-depot', $DepotId, '-manifest', $kompilacja.Manifest,
+                   '-dir', "`"$katalogRoboczy`"", '-qr', '-loginid', $script:LoginId)
+        $procQr = Start-Process -FilePath $exe -ArgumentList $argQr `
+                                -WorkingDirectory ([System.IO.Path]::GetDirectoryName($exe)) `
+                                -NoNewWindow -Wait -PassThru
+        $kod = $procQr.ExitCode
         [Console]::CursorVisible = $false
         if ($kod -ne 0) {
             Show-Komunikat -Wiersze @("DepotDownloader zakończył pracę z kodem $kod.") -Tytul 'Błąd' -Barwa 'Czerwony'

@@ -116,7 +116,7 @@ function Invoke-LogowanieSteam {
 
     $argumenty = @(
         '-app', $AppId, '-depot', $DepotId, '-manifest', $Manifest,
-        '-dir', $tymczasowy, '-filelist', $pustaLista, '-loginid', $script:LoginId
+        '-dir', "`"$tymczasowy`"", '-filelist', "`"$pustaLista`"", '-loginid', $script:LoginId
     )
     if ($KodQr) {
         $argumenty += '-qr'
@@ -124,16 +124,18 @@ function Invoke-LogowanieSteam {
         $argumenty += @('-username', $Uzytkownik, '-remember-password')
     }
 
-    Push-Location $katalog
-    try {
-        & $Exe @argumenty
-        $kod = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
+    # Uruchomienie operatorem & kieruje wyjście narzędzia do strumienia sukcesu tej
+    # funkcji, a ten jest przechwytywany przez przypisanie po stronie wywołującego.
+    # PowerShell podstawia wtedy procesowi potok zamiast konsoli, więc monit o hasło
+    # staje się niewidoczny, podczas gdy Console.ReadKey nadal czeka na klawisze -
+    # program sprawia wrażenie zawieszonego. Start-Process -NoNewWindow przekazuje
+    # uchwyty konsoli bezpośrednio i nie przechwytuje niczego.
+    $proces = Start-Process -FilePath $Exe -ArgumentList $argumenty `
+                            -WorkingDirectory $katalog -NoNewWindow -Wait -PassThru
+    $kod = $proces.ExitCode
 
     Remove-Item -LiteralPath $tymczasowy -Recurse -Force -ErrorAction SilentlyContinue
-    return ($kod -eq 0)
+    return [bool]($kod -eq 0)
 }
 
 function Start-PobieranieDepotu {
