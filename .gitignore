@@ -1,0 +1,13 @@
+# DepotDownloader pobierany automatycznie przy pierwszym uruchomieniu
+tools/
+
+# Dzienniki sesji
+logs/
+
+# Pliki tymczasowe pobierania
+_pjpt_pobieranie/
+*.zip
+
+# Dane logowania zapisywane przez DepotDownloader
+account.config
+depot.config
