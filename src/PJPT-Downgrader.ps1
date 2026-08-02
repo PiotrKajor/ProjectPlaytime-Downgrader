@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v1.1.2'
+$Wersja  = 'v1.2.0'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -282,6 +282,32 @@ function Invoke-Logowanie {
         Write-Host ''
         Read-Host '  Naciśnij Enter, aby wrócić do menu'
         return $null
+    }
+
+    # Po zalogowaniu kodem QR nazwa konta nie jest znana, a bez niej pobieranie
+    # wymagałoby zeskanowania drugiego kodu i musiałoby działać w trybie tekstowym.
+    # Token zapisany w account.config zawiera ją jako klucz słownika - odczytanie
+    # nazwy pozwala potraktować sesję QR tak samo jak zwykłą i pokazać pełny interfejs.
+    if ($qr) {
+        $kandydaci = Get-NazwyKontZSesji -KatalogNarzedzi $Katalogi.Narzedzia
+        Zapisz-Dziennik "Sesja QR: kandydatów na nazwę konta: $($kandydaci.Count)"
+
+        [Console]::CursorVisible = $false
+        if ($kandydaci.Count -eq 1) {
+            $uzytkownik = $kandydaci[0]
+            $qr = $false
+        } elseif ($kandydaci.Count -gt 1) {
+            $pozycje = @()
+            foreach ($k in $kandydaci) { $pozycje += [pscustomobject]@{ Etykieta = $k; Opis = '' } }
+            $pozycje += [pscustomobject]@{ Etykieta = 'Żadne z powyższych'; Opis = 'Pobieranie w trybie tekstowym, z ponownym kodem QR' }
+
+            $w = Show-Menu -Pozycje $pozycje -Tytul 'Które konto zostało użyte?' `
+                           -Podtytul 'Wskazanie konta pozwala pokazać pełny podgląd postępu' -Wersja $Wersja -BezEscape
+            if ($w -lt $kandydaci.Count) {
+                $uzytkownik = $kandydaci[$w]
+                $qr = $false
+            }
+        }
     }
 
     if ($uzytkownik) { Set-ZapamietaneKonto -KatalogNarzedzi $Katalogi.Narzedzia -Uzytkownik $uzytkownik }

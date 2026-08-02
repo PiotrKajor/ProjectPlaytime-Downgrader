@@ -28,6 +28,50 @@ function Set-ZapamietaneKonto {
     } catch { }
 }
 
+function Get-NazwyKontZSesji {
+    <#
+        Wyciąga nazwy kont z pliku account.config zapisywanego przez DepotDownloadera.
+
+        Plik jest strukturą binarną, ale klucze słowników trafiają do niego jako
+        zwykłe ciągi ASCII, a jednym z nich jest nazwa konta. Wzorzec nazwy konta
+        Steam - litery, cyfry i podkreślenie, do 32 znaków - wyklucza zarówno tokeny
+        (długie, z kropkami), jak i adresy serwerów CDN (z kropkami i myślnikami),
+        więc żadna wartość wrażliwa nie może zostać zwrócona.
+    #>
+    param([Parameter(Mandatory)][string]$KatalogNarzedzi, [int]$Limit = 4)
+
+    $plik = [System.IO.Path]::Combine($KatalogNarzedzi, 'account.config')
+    if (-not [System.IO.File]::Exists($plik)) { return @() }
+
+    try {
+        $bajty = [System.IO.File]::ReadAllBytes($plik)
+    } catch {
+        return @()
+    }
+
+    $ciagi = New-Object System.Collections.Generic.List[string]
+    $biezacy = New-Object System.Text.StringBuilder
+
+    foreach ($b in $bajty) {
+        if ($b -ge 32 -and $b -le 126) {
+            [void]$biezacy.Append([char]$b)
+        } else {
+            if ($biezacy.Length -ge 2) { $ciagi.Add($biezacy.ToString()) }
+            [void]$biezacy.Clear()
+        }
+    }
+    if ($biezacy.Length -ge 2) { $ciagi.Add($biezacy.ToString()) }
+
+    $kandydaci = @($ciagi | Where-Object { $_ -match '^[A-Za-z0-9_]{2,32}$' } | Sort-Object -Unique)
+
+    # Realny plik zawiera nazwy kont, na których faktycznie się logowano - w praktyce
+    # jedno, wyjątkowo kilka. Większa liczba oznacza, że wzorzec trafił w przypadkowe
+    # ciągi, na przykład w pliku uszkodzonym albo o zmienionym formacie. Zgadywanie
+    # nazwy konta na takiej podstawie byłoby gorsze niż powrót do trybu tekstowego.
+    if ($kandydaci.Count -gt $Limit) { return @() }
+    return $kandydaci
+}
+
 function Test-ZapisanaSesja {
     <#
         DepotDownloader przechowuje token sesji w pliku account.config w swoim
@@ -118,8 +162,10 @@ function Invoke-LogowanieSteam {
         '-app', $AppId, '-depot', $DepotId, '-manifest', $Manifest,
         '-dir', "`"$tymczasowy`"", '-filelist', "`"$pustaLista`"", '-loginid', $script:LoginId
     )
+    # -remember-password także dla kodu QR: bez tego token nie zostaje zapisany
+    # i pobieranie wymagałoby zeskanowania drugiego kodu.
     if ($KodQr) {
-        $argumenty += '-qr'
+        $argumenty += @('-qr', '-remember-password')
     } else {
         $argumenty += @('-username', $Uzytkownik, '-remember-password')
     }

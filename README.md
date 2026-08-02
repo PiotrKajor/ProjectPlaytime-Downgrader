@@ -6,7 +6,7 @@
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
-![Wersja](https://img.shields.io/badge/wersja-1.1.2-D42E33?style=for-the-badge)
+![Wersja](https://img.shields.io/badge/wersja-1.2.0-D42E33?style=for-the-badge)
 ![Licencja](https://img.shields.io/badge/licencja-MIT-ECB524?style=for-the-badge)
 
 **Instalator starszych kompilacji gry PROJECT: PLAYTIME.**
@@ -23,7 +23,7 @@ Jeden plik do kliknięcia. Zero konfiguracji, zero zależności do zainstalowani
 
 ```
 ════════════════════════════════════════════════════════════════════
-  PROJECT: PLAYTIME  ·  DOWNGRADER                          v1.1.2
+  PROJECT: PLAYTIME  ·  DOWNGRADER                          v1.2.0
 ════════════════════════════════════════════════════════════════════
   Pobieranie zawartości
 
@@ -169,14 +169,21 @@ narzędzia — repozytorium nie zawiera kodu obsługującego hasła i nigdzie ic
 
 | Tryb | Postęp | Uwagi |
 |:--|:--|:--|
-| **Nazwa użytkownika i hasło** | pełny interfejs | Zalecany. Logowanie w osobnym kroku |
-| **Kod QR** | tryb tekstowy | Bez hasła, potwierdzenie w Steam Mobile |
+| **Nazwa użytkownika i hasło** | pełny interfejs | Logowanie w osobnym kroku |
+| **Kod QR** | pełny interfejs | Bez hasła, potwierdzenie w Steam Mobile |
 
-Różnica wynika z ograniczenia DepotDownloadera: hasło czytane jest przez
-`Console.ReadKey`, co przy przekierowanym wejściu kończy się wyjątkiem. Nie da się
-więc jednocześnie obsłużyć logowania i przechwytywać wyjścia na potrzeby paska
-postępu. Tryb z nazwą użytkownika rozdziela oba etapy na dwa uruchomienia,
-tryb QR musi zmieścić się w jednym.
+Oba tryby rozdzielają logowanie i pobieranie na dwa uruchomienia narzędzia.
+Wynika to z jego ograniczenia: hasło czytane jest przez `Console.ReadKey`, co przy
+przekierowanym wejściu kończy się wyjątkiem, więc nie da się jednocześnie obsłużyć
+logowania i przechwytywać wyjścia na potrzeby paska postępu. Pierwsze uruchomienie
+zajmuje się wyłącznie uwierzytelnieniem, drugie — korzystając z zapisanego tokenu —
+pobieraniem z pełnym podglądem.
+
+W trybie QR nazwa konta nie jest znana z góry, a bez niej drugie uruchomienie
+wymagałoby zeskanowania kolejnego kodu. Program odczytuje ją więc z pliku
+`account.config`, w którym DepotDownloader zapisuje token: nazwa konta występuje
+tam jako klucz słownika. Gdy odczyt jest niejednoznaczny, pojawia się menu wyboru,
+a gdy zawiedzie — pobieranie wraca do trybu tekstowego.
 
 ### Skoro klient Steam jest zalogowany, po co drugie logowanie?
 
