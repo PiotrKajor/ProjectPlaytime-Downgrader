@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v2.1.0'
+$Wersja  = 'v2.1.1'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -347,22 +347,6 @@ function Show-Pobieranie {
         [string]$Uzytkownik
     )
 
-    $szer = Get-SzerokoscEkranu
-    Clear-Ekran
-    Draw-Naglowek -Podtytul 'Pobieranie zawartości' -Wersja $Wersja
-
-    Write-Wiersz 2 5 (Format-Barwa (Format-Skrot $Kompilacja.Etykieta ($szer - 4)) 'Bialy')
-    Write-Wiersz 2 6 (Format-Barwa "manifest $($Kompilacja.Manifest)   ·   depot $DepotId" 'Przygas')
-
-    $yPasek  = 8
-    $yStat   = 10
-    $yPlik   = 13
-    $yLog    = 15
-    $wysLog  = [Math]::Max(5, (Get-WysokoscEkranu) - $yLog - 3)
-    $szerLog = $szer - 4
-
-    Draw-Ramka -X 2 -Y $yLog -Szerokosc $szerLog -Wysokosc $wysLog -Tytul 'Dziennik' -Barwa 'Szary'
-
     $stan = Start-PobieranieDepotu -Exe $Exe -AppId $AppId -DepotId $DepotId `
                                    -Manifest $Kompilacja.Manifest -Katalog $KatalogDocelowy `
                                    -Uzytkownik $Uzytkownik
@@ -370,10 +354,47 @@ function Show-Pobieranie {
 
     $klatka = 0
     $ostatniLog = -1
+    $ostatniaSzer = -1
+    $ostatniaWys  = -1
+    $szer = 0; $yPasek = 0; $yStat = 0; $yPlik = 0; $yLog = 0; $wysLog = 0; $szerLog = 0
 
     try {
         while (-not $stan.Zakonczone) {
             $stan = Update-StanPobierania -Stan $stan
+
+            # Wymiary sprawdzane w każdej klatce. Zmiana rozmiaru okna w trakcie
+            # pobierania unieważnia wszystkie współrzędne: paski i etykiety lądowały
+            # w nowych miejscach, a stara treść pozostawała na ekranie, dając obraz
+            # nakładających się na siebie fragmentów. Przy zmianie rysowana jest
+            # cała rama od nowa.
+            $biezacaSzer = Get-SzerokoscEkranu
+            $biezacaWys  = Get-WysokoscEkranu
+
+            if ($biezacaSzer -ne $ostatniaSzer -or $biezacaWys -ne $ostatniaWys) {
+                $szer = $biezacaSzer
+                $ostatniaSzer = $biezacaSzer
+                $ostatniaWys  = $biezacaWys
+
+                $yPasek  = 8
+                $yStat   = 10
+                $yPlik   = 13
+                $yLog    = 15
+                $wysLog  = $biezacaWys - $yLog - 3
+                $szerLog = $szer - 4
+
+                Clear-Ekran
+                Draw-Naglowek -Podtytul 'Pobieranie zawartości' -Wersja $Wersja
+                Write-Wiersz 2 5 (Format-Barwa (Format-Skrot $Kompilacja.Etykieta ($szer - 4)) 'Bialy')
+                Write-Wiersz 2 6 (Format-Barwa ('manifest ' + $Kompilacja.Manifest + '   ·   depot ' + $DepotId) 'Przygas')
+
+                # Dziennik rysowany tylko wtedy, gdy zostało na niego miejsce.
+                if ($wysLog -ge 3) {
+                    Draw-Ramka -X 2 -Y $yLog -Szerokosc $szerLog -Wysokosc $wysLog -Tytul 'Dziennik' -Barwa 'Szary'
+                } else {
+                    $wysLog = 0
+                }
+                $ostatniLog = -1
+            }
 
             $uplyw = ((Get-Date) - $stan.Start).TotalSeconds
             if ($stan.Procent -gt 0.5) {
@@ -381,26 +402,22 @@ function Show-Pobieranie {
             } else {
                 $pozostalo = -1
             }
-            if ($stan.Procent -gt 0.5) {
-                $calosc = $stan.Bajty * 100 / $stan.Procent
-            } else {
-                $calosc = 0
-            }
 
             Draw-Pasek -X 2 -Y $yPasek -Szerokosc ($szer - 14) -Procent $stan.Procent
             Write-Wiersz ($szer - 11) $yPasek (Format-Barwa ('{0,6:N2} %' -f $stan.Procent) 'Bialy')
 
-            $rozmiar = Format-Bajty $stan.Bajty
-            if ($calosc -gt 0) { $rozmiar += ' / ' + (Format-Bajty $calosc) }
-
+            # Pokazywana jest wyłącznie zmierzona ilość danych na dysku. Wcześniej
+            # doliczany był rozmiar całkowity szacowany z procentu postępu, ale przy
+            # niskich wartościach procentu wychodziły z tego liczby rzędu setek
+            # gigabajtów, zmieniające się z klatki na klatkę.
             Clear-Wiersz $yStat $szer
             Write-Wiersz 4 $yStat (
-                (Format-Barwa 'Pobrano   ' 'Przygas') + (Format-Barwa ('{0,-22}' -f $rozmiar) 'Bialy') +
-                (Format-Barwa 'Prędkość  ' 'Przygas') + (Format-Barwa ('{0}/s' -f (Format-Bajty $stan.Predkosc)) 'Zielony'))
+                (Format-Barwa 'Pobrano   ' 'Przygas') + (Format-Barwa (Format-Pole (Format-Bajty $stan.Bajty) 22) 'Bialy') +
+                (Format-Barwa 'Prędkość  ' 'Przygas') + (Format-Barwa ((Format-Bajty $stan.Predkosc) + '/s') 'Zielony'))
 
             Clear-Wiersz ($yStat + 1) $szer
             Write-Wiersz 4 ($yStat + 1) (
-                (Format-Barwa 'Czas      ' 'Przygas') + (Format-Barwa ('{0,-22}' -f (Format-Czas $uplyw)) 'Bialy') +
+                (Format-Barwa 'Czas      ' 'Przygas') + (Format-Barwa (Format-Pole (Format-Czas $uplyw) 22) 'Bialy') +
                 (Format-Barwa 'Pozostało ' 'Przygas') + (Format-Barwa (Format-Czas $pozostalo) 'Zolty'))
 
             Clear-Wiersz $yPlik $szer
@@ -408,7 +425,7 @@ function Show-Pobieranie {
                 (Format-Barwa " $(Get-Spinner $klatka) " 'Czerwony') +
                 (Format-Barwa (Format-Skrot $stan.PlikBiezacy ($szer - 8)) 'Blekit'))
 
-            if ($stan.Dziennik.Count -ne $ostatniLog) {
+            if ($wysLog -ge 3 -and $stan.Dziennik.Count -ne $ostatniLog) {
                 $ostatniLog = $stan.Dziennik.Count
                 $ile = $wysLog - 2
                 $od = [Math]::Max(0, $stan.Dziennik.Count - $ile)
@@ -908,31 +925,42 @@ function Show-PostepSteam {
     #>
     param([Parameter(Mandatory)][string]$Acf)
 
-    $szer = Get-SzerokoscEkranu
-    Clear-Ekran
-    Draw-Naglowek -Podtytul 'Instalacja wersji bazowej przez Steam' -Wersja $Wersja
-
-    Write-Wiersz 2 5 (Format-Barwa 'Pobieranie prowadzi klient Steam. Okno można zminimalizować.' 'Bialy')
-    Write-Wiersz 2 6 (Format-Barwa 'Esc przerywa oczekiwanie i wraca do menu (pobieranie trwa dalej).' 'Przygas')
-
+    $szer = 0
     $yPasek = 9
     $yStat  = 11
     $klatka = 0
     $start  = Get-Date
+    $ostatniaSzer = -1
+    $ostatniaWys  = -1
 
     while ($true) {
         $stan = Get-PostepInstalacjiSteam -Acf $Acf
         if ($stan.Gotowe) { return $true }
 
+        # przerysowanie ramy po zmianie rozmiaru okna
+        $biezacaSzer = Get-SzerokoscEkranu
+        $biezacaWys  = Get-WysokoscEkranu
+        if ($biezacaSzer -ne $ostatniaSzer -or $biezacaWys -ne $ostatniaWys) {
+            $szer = $biezacaSzer
+            $ostatniaSzer = $biezacaSzer
+            $ostatniaWys  = $biezacaWys
+
+            Clear-Ekran
+            Draw-Naglowek -Podtytul 'Instalacja wersji bazowej przez Steam' -Wersja $Wersja
+            Write-Wiersz 2 5 (Format-Barwa (Format-Skrot 'Pobieranie prowadzi klient Steam. Okno można zminimalizować.' ($szer - 4)) 'Bialy')
+            Write-Wiersz 2 6 (Format-Barwa (Format-Skrot 'Esc przerywa oczekiwanie i wraca do menu (pobieranie trwa dalej).' ($szer - 4)) 'Przygas')
+        }
+
         Draw-Pasek -X 2 -Y $yPasek -Szerokosc ($szer - 14) -Procent $stan.Procent
         Write-Wiersz ($szer - 11) $yPasek (Format-Barwa ('{0,6:N2} %' -f $stan.Procent) 'Bialy')
 
+        # tu wartość całkowita pochodzi wprost z appmanifest, więc jest wiarygodna
         $rozmiar = Format-Bajty $stan.Bajty
         if ($stan.Calosc -gt 0) { $rozmiar += ' / ' + (Format-Bajty $stan.Calosc) }
 
         Clear-Wiersz $yStat $szer
         Write-Wiersz 4 $yStat (
-            (Format-Barwa 'Pobrano   ' 'Przygas') + (Format-Barwa ('{0,-24}' -f $rozmiar) 'Bialy') +
+            (Format-Barwa 'Pobrano   ' 'Przygas') + (Format-Barwa (Format-Pole $rozmiar 24) 'Bialy') +
             (Format-Barwa 'Czas  ' 'Przygas') + (Format-Barwa (Format-Czas ((Get-Date) - $start).TotalSeconds) 'Bialy'))
 
         Clear-Wiersz ($yStat + 2) $szer
@@ -1109,19 +1137,24 @@ function Invoke-PelnaInstalacja {
         if (-not $ok) { return }
     }
 
-    $szerEkranu = Get-SzerokoscEkranu
-    Clear-Ekran
-    Draw-Naglowek -Podtytul 'Przygotowanie narzędzi' -Wersja $Wersja
-    $kroki = New-ListaKrokow @('DepotDownloader')
-    Draw-Kroki -Kroki $kroki -Y 6
-    $kroki[0].Stan = 'trwa'; Draw-Kroki -Kroki $kroki -Y 6
-
-    Write-Wiersz 4 8 (Format-Barwa (Format-Skrot "Katalog: $($Katalogi.Narzedzia)" ($szerEkranu - 8)) 'Przygas')
-    Write-Wiersz 4 9 (Format-Barwa 'Pobierane jednorazowo — kolejne uruchomienia korzystają z tej kopii.' 'Przygas')
-
-    # Licznik animacji w zasięgu skryptu: inkrementacja wewnątrz scriptblocka
-    # utworzyłaby kopię lokalną i wskaźnik stałby w miejscu.
+    # Licznik animacji oraz ostatnio narysowana szerokość trzymane w zasięgu skryptu:
+    # scriptblock tworzyłby własne kopie, a wskaźnik i wykrywanie zmiany rozmiaru
+    # przestałyby działać.
     $script:KlatkaNarzedzia = 0
+    $script:SzerNarzedzia   = -1
+
+    $rysujRame = {
+        $script:SzerNarzedzia = Get-SzerokoscEkranu
+        Clear-Ekran
+        Draw-Naglowek -Podtytul 'Przygotowanie narzędzi' -Wersja $Wersja
+        Draw-Kroki -Kroki $kroki -Y 6
+        Write-Wiersz 4 8 (Format-Barwa (Format-Skrot ('Katalog: ' + $Katalogi.Narzedzia) ($script:SzerNarzedzia - 8)) 'Przygas')
+        Write-Wiersz 4 9 (Format-Barwa (Format-Skrot 'Pobierane jednorazowo — kolejne uruchomienia korzystają z tej kopii.' ($script:SzerNarzedzia - 8)) 'Przygas')
+    }
+
+    $kroki = New-ListaKrokow @('DepotDownloader')
+    & $rysujRame
+    $kroki[0].Stan = 'trwa'; Draw-Kroki -Kroki $kroki -Y 6
 
     try {
         $exe = Get-DepotDownloader -KatalogNarzedzi $Katalogi.Narzedzia `
@@ -1131,21 +1164,29 @@ function Invoke-PelnaInstalacja {
         } -PostepPobierania {
             param($pobrane, $calosc, $predkosc)
 
+            # zmiana rozmiaru okna w trakcie pobierania unieważnia współrzędne
+            if ((Get-SzerokoscEkranu) -ne $script:SzerNarzedzia) {
+                & $rysujRame
+                Draw-Kroki -Kroki $kroki -Y 6
+            }
+            $szerEkranu = $script:SzerNarzedzia
+
             $procent = 0
             if ($calosc -gt 0) { $procent = $pobrane * 100.0 / $calosc }
 
             Draw-Pasek -X 4 -Y 11 -Szerokosc ($szerEkranu - 16) -Procent $procent -Barwa 'Blekit'
             Write-Wiersz ($szerEkranu - 11) 11 (Format-Barwa ('{0,6:N1} %' -f $procent) 'Bialy')
 
-            $opis = '{0} / {1}' -f (Format-Bajty $pobrane), (Format-Bajty $calosc)
+            $opis = (Format-Bajty $pobrane) + ' / ' + (Format-Bajty $calosc)
             if ($predkosc -gt 0) {
-                $opis += '   ·   {0}/s' -f (Format-Bajty $predkosc)
+                $opis += '   ·   ' + (Format-Bajty $predkosc) + '/s'
                 if ($calosc -gt $pobrane) {
-                    $opis += '   ·   pozostało {0}' -f (Format-Czas (($calosc - $pobrane) / $predkosc))
+                    $opis += '   ·   pozostało ' + (Format-Czas (($calosc - $pobrane) / $predkosc))
                 }
             }
             Clear-Wiersz 13 $szerEkranu
-            Write-Wiersz 6 13 ((Format-Barwa " $(Get-Spinner $script:KlatkaNarzedzia) " 'Czerwony') + (Format-Barwa $opis 'Bialy'))
+            Write-Wiersz 6 13 ((Format-Barwa " $(Get-Spinner $script:KlatkaNarzedzia) " 'Czerwony') +
+                               (Format-Barwa (Format-Skrot $opis ($szerEkranu - 10)) 'Bialy'))
             $script:KlatkaNarzedzia++
         }
         $kroki[0].Stan = 'gotowe'; Draw-Kroki -Kroki $kroki -Y 6

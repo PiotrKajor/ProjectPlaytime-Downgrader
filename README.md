@@ -6,7 +6,7 @@
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
-![Wersja](https://img.shields.io/badge/wersja-2.1.0-D42E33?style=for-the-badge)
+![Wersja](https://img.shields.io/badge/wersja-2.1.1-D42E33?style=for-the-badge)
 ![Licencja](https://img.shields.io/badge/licencja-MIT-ECB524?style=for-the-badge)
 
 **Instalator starszych kompilacji gry PROJECT: PLAYTIME.**
@@ -23,7 +23,7 @@ Jeden plik do kliknięcia. Zero konfiguracji, zero zależności do zainstalowani
 
 ```
 ════════════════════════════════════════════════════════════════════
-  PROJECT: PLAYTIME  ·  DOWNGRADER                          v2.1.0
+  PROJECT: PLAYTIME  ·  DOWNGRADER                          v2.1.1
 ════════════════════════════════════════════════════════════════════
   Pobieranie zawartości
 
