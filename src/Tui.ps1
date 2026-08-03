@@ -149,6 +149,47 @@ function Format-Pole {
     return $Tekst + (Get-Powtorzenie ' ' ($Szerokosc - $Tekst.Length))
 }
 
+function Split-NaWiersze {
+    <#
+        Dzieli tekst na wiersze mieszczące się w zadanej szerokości, łamiąc na
+        granicy słów. Pozwala układowi dopasować się do okna zamiast obcinać treść.
+        Słowo dłuższe niż wiersz - na przykład długa ścieżka - dzielone jest twardo.
+    #>
+    param([string]$Tekst, [int]$Szerokosc)
+
+    if ($null -eq $Tekst -or $Tekst -eq '') { return , @('') }
+    if ($Szerokosc -lt 8) { $Szerokosc = 8 }
+
+    $wynik = New-Object System.Collections.Generic.List[string]
+
+    foreach ($akapit in ($Tekst -split "`r?`n")) {
+        $biezacy = ''
+        foreach ($slowo in ($akapit -split ' ')) {
+            if ($slowo.Length -gt $Szerokosc) {
+                if ($biezacy) { $wynik.Add($biezacy); $biezacy = '' }
+                $reszta = $slowo
+                while ($reszta.Length -gt $Szerokosc) {
+                    $wynik.Add($reszta.Substring(0, $Szerokosc))
+                    $reszta = $reszta.Substring($Szerokosc)
+                }
+                $biezacy = $reszta
+                continue
+            }
+            if (-not $biezacy) {
+                $biezacy = $slowo
+            } elseif (($biezacy.Length + 1 + $slowo.Length) -le $Szerokosc) {
+                $biezacy += ' ' + $slowo
+            } else {
+                $wynik.Add($biezacy)
+                $biezacy = $slowo
+            }
+        }
+        $wynik.Add($biezacy)
+    }
+
+    return , $wynik.ToArray()
+}
+
 function Read-Klawisz {
     <#
         Bezpieczny odczyt klawisza. Bez konsoli ReadKey rzuca wyjątkiem, co bez

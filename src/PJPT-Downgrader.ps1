@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v2.0.0'
+$Wersja  = 'v2.0.1'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -567,62 +567,146 @@ function Install-Kompilacja {
     }
 }
 
+function New-KrokPodsumowania {
+    <#
+        Osobna funkcja zamiast literału tablicy. Zapis @('a', 'txt ' + $x, 'c')
+        rozpada się w PowerShellu na cztery elementy, ponieważ przecinek wiąże
+        silniej niż konkatenacja, a @( @(...) ) spłaszcza tablicę w tablicy.
+        Obiekt z nazwanymi polami usuwa obie pułapki naraz.
+    #>
+    param([string]$Ikona, [string]$Tekst, [string]$Barwa)
+    return [pscustomobject]@{ Ikona = $Ikona; Tekst = $Tekst; Barwa = $Barwa }
+}
+
+function Get-UkladPodsumowania {
+    <#
+        Wylicza wiersze do narysowania dla zadanych wymiarów okna. Funkcja jest
+        czysta - nie dotyka konsoli - dzięki czemu układ da się sprawdzić dla
+        dowolnych rozmiarów bez uruchamiania programu.
+
+        Sekcje mają priorytety. Gdy okno jest niskie, odpadają kolejno: wskazówki
+        uruchamiania, pusty odstęp i nazwa wersji. Wykaz wykonanych kroków zostaje
+        zawsze, bo to jedyna informacja o tym, co program faktycznie zrobił.
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Wynik,
+        [Parameter(Mandatory)][object]$Kompilacja,
+        [Parameter(Mandatory)][int]$Szerokosc,
+        [Parameter(Mandatory)][int]$Wysokosc
+    )
+
+    $kroki = New-Object System.Collections.Generic.List[object]
+    $kroki.Add((New-KrokPodsumowania '✔' ("Pobrano kompilację  ·  manifest " + $Kompilacja.Manifest) 'Zielony'))
+
+    if ($Wynik.Kopia) {
+        $nazwaKopii = [System.IO.Path]::GetFileName([string]$Wynik.Kopia)
+        $kroki.Add((New-KrokPodsumowania '✔' ("Poprzednią wersję zachowano jako " + $nazwaKopii) 'Zielony'))
+    } else {
+        $kroki.Add((New-KrokPodsumowania '–' 'Kopia zapasowa: brak poprzedniej instalacji do zachowania' 'Szary'))
+    }
+
+    $kroki.Add((New-KrokPodsumowania '✔' 'Pliki gry podmieniono w bibliotece Steam' 'Zielony'))
+
+    $build = [string]$Wynik.Build
+    if (-not $build) { $build = 'nieznany' }
+    $kroki.Add((New-KrokPodsumowania '✔' ('Przycisk „Graj” skonfigurowany  ·  buildid ' + $build) 'Zielony'))
+
+    if ($Wynik.Skrot) {
+        $kroki.Add((New-KrokPodsumowania '✔' 'Skrót „PROJECT PLAYTIME (starsza wersja)” na pulpicie' 'Zielony'))
+    } else {
+        $kroki.Add((New-KrokPodsumowania '–' 'Skrót na pulpicie: nie utworzono' 'Szary'))
+    }
+
+    $wskazowki = @(
+        'Naciśnij „Graj” w Steam albo użyj skrótu z pulpitu — działają tak samo, aktualizacja nie zostanie pobrana.',
+        'Nie używaj opcji „Sprawdź spójność plików gry”: cofa całą operację.'
+    )
+
+    # Miejsce dostępne między nagłówkiem a stopką z podpowiedzią.
+    $pierwszyWiersz = 5
+    $dostepne = $Wysokosc - $pierwszyWiersz - 3
+    if ($dostepne -lt 3) { $dostepne = 3 }
+
+    $wiersze = New-Object System.Collections.Generic.List[object]
+    $dodaj = {
+        param([int]$Wciecie, [string]$Tekst, [string]$Barwa)
+        $wiersze.Add([pscustomobject]@{ Wciecie = $Wciecie; Tekst = $Tekst; Barwa = $Barwa })
+    }
+
+    & $dodaj 2 '✔  GOTOWE — gra jest gotowa do uruchomienia' 'Zielony'
+
+    # Wiersz kroku: ikona, dwie spacje, treść. Kontynuacja zawiniętego tekstu
+    # dostaje wcięcie równe szerokości ikony, aby wykaz pozostał czytelny.
+    $szerTresci = $Szerokosc - 9
+    if ($szerTresci -lt 12) { $szerTresci = 12 }
+
+    $wierszeKrokow = New-Object System.Collections.Generic.List[object]
+    foreach ($k in $kroki) {
+        $czesci = Split-NaWiersze -Tekst $k.Tekst -Szerokosc $szerTresci
+        for ($i = 0; $i -lt $czesci.Count; $i++) {
+            if ($i -eq 0) { $wierszeKrokow.Add([pscustomobject]@{ Wciecie = 4; Tekst = ($k.Ikona + '  ' + $czesci[$i]); Barwa = $k.Barwa }) }
+            else          { $wierszeKrokow.Add([pscustomobject]@{ Wciecie = 7; Tekst = $czesci[$i];                    Barwa = $k.Barwa }) }
+        }
+    }
+
+    # Pusty odstęp jest ozdobą i ustępuje miejsca treści. W bardzo niskim oknie
+    # lepiej pokazać o jeden krok więcej niż zachować estetyczny odstęp.
+    if ($wiersze.Count + 1 + $wierszeKrokow.Count -le $dostepne) { & $dodaj 0 '' 'Bialy' }
+    foreach ($w in $wierszeKrokow) { $wiersze.Add($w) }
+
+    if ($wiersze.Count + 2 -le $dostepne) {
+        & $dodaj 0 '' 'Bialy'
+        foreach ($w in (Split-NaWiersze -Tekst ('Zainstalowana wersja: ' + $Kompilacja.Etykieta) -Szerokosc ($Szerokosc - 8))) {
+            & $dodaj 4 $w 'Blekit'
+        }
+    }
+
+    $szerWskazowki = $Szerokosc - 8
+    if ($szerWskazowki -lt 12) { $szerWskazowki = 12 }
+    foreach ($wsk in $wskazowki) {
+        $czesci = Split-NaWiersze -Tekst $wsk -Szerokosc $szerWskazowki
+        if ($wiersze.Count + $czesci.Count + 1 -gt $dostepne) { break }
+        & $dodaj 0 '' 'Bialy'
+        foreach ($c in $czesci) { & $dodaj 4 $c 'Przygas' }
+    }
+
+    # Zabezpieczenie ostateczne: nadmiar wierszy jest ucinany, aby stopka
+    # z podpowiedzią nie wyszła poza ekran.
+    #
+    # ToArray zamiast @(): operator tablicy zastosowany do List[object] kończy się
+    # w PowerShellu błędem „Argument types do not match”, mimo że ta sama lista
+    # przepuszczona przez potok działa poprawnie.
+    $lista = $wiersze.ToArray()
+    if ($lista.Count -gt $dostepne) { $lista = @($lista | Select-Object -First $dostepne) }
+
+    return [pscustomobject]@{
+        Wiersze        = $lista
+        PierwszyWiersz = $pierwszyWiersz
+        WierszStopki   = [Math]::Min($Wysokosc - 2, $pierwszyWiersz + $lista.Count + 1)
+    }
+}
+
 function Show-Podsumowanie {
     param([Parameter(Mandatory)][object]$Wynik, [Parameter(Mandatory)][object]$Kompilacja)
 
     Set-TytulOkna 'GOTOWE · PROJECT: PLAYTIME Downgrader'
     Invoke-Sygnal
 
+    $szer = Get-SzerokoscEkranu
+    $wys  = Get-WysokoscEkranu
+
     Clear-Ekran
     Draw-Naglowek -Podtytul 'Instalacja zakończona' -Wersja $Wersja
-    $szer = Get-SzerokoscEkranu
 
-    $y = 5
-    Write-Wiersz 2 $y (Format-Barwa '  ✔  GOTOWE' 'Zielony')
-    Write-Wiersz 13 $y (Format-Barwa '— gra jest gotowa do uruchomienia' 'Bialy')
-    $y += 2
+    $uklad = Get-UkladPodsumowania -Wynik $Wynik -Kompilacja $Kompilacja -Szerokosc $szer -Wysokosc $wys
 
-    # Wykaz tego, co faktycznie zostało zrobione. Bez niego użytkownik po długim
-    # pobieraniu nie ma jak stwierdzić, które kroki się powiodły.
-    $kroki = @(
-        @('✔', "Pobrano kompilację  ·  manifest $($Kompilacja.Manifest)", 'Zielony')
-    )
-    if ($Wynik.Kopia) {
-        $kroki += , @('✔', "Poprzednią wersję zachowano jako $([System.IO.Path]::GetFileName($Wynik.Kopia))", 'Zielony')
-    } else {
-        $kroki += , @('–', 'Kopia zapasowa: brak poprzedniej instalacji do zachowania', 'Szary')
-    }
-    $kroki += , @('✔', 'Pliki gry podmieniono w bibliotece Steam', 'Zielony')
-    # cudzysłowy drukarskie tylko w łańcuchach apostrofowych: PowerShell traktuje
-    # znak ” jako ogranicznik i przerywa na nim łańcuch w cudzysłowach prostych
-    $kroki += , @('✔', 'Przycisk „Graj” skonfigurowany  ·  buildid ' + $Wynik.Build, 'Zielony')
-    if ($Wynik.Skrot) {
-        $kroki += , @('✔', 'Skrót „PROJECT PLAYTIME (starsza wersja)” na pulpicie', 'Zielony')
-    } else {
-        $kroki += , @('–', 'Skrót na pulpicie: nie utworzono', 'Szary')
-    }
-
-    foreach ($k in $kroki) {
-        Write-Wiersz 4 $y ((Format-Barwa "$($k[0])  " $k[2]) + (Format-Barwa (Format-Skrot $k[1] ($szer - 10)) 'Bialy'))
+    $y = $uklad.PierwszyWiersz
+    foreach ($w in $uklad.Wiersze) {
+        if ($w.Tekst) { Write-Wiersz $w.Wciecie $y (Format-Barwa $w.Tekst $w.Barwa) }
         $y++
     }
-    $y++
 
-    Write-Wiersz 4 $y (Format-Barwa (Format-Skrot "Zainstalowana wersja: $($Kompilacja.Etykieta)" ($szer - 8)) 'Blekit')
-    $y += 2
-
-    Draw-Ramka -X 2 -Y $y -Szerokosc ($szer - 4) -Wysokosc 6 -Tytul 'Jak uruchomić' -Barwa 'Zielony'
-    $tresc = @(
-        'Naciśnij „Graj” w Steam albo użyj skrótu z pulpitu — działają tak samo.',
-        'Aktualizacja nie zostanie pobrana.',
-        'Nie używaj opcji „Sprawdź spójność plików gry”: cofa całą operację.'
-    )
-    for ($i = 0; $i -lt $tresc.Count; $i++) {
-        Write-Wiersz 4 ($y + 1 + $i) (Format-Barwa (Format-Skrot $tresc[$i] ($szer - 8)) 'Bialy')
-    }
-
-    $y += 7
-    Wait-Klawisz -Tekst 'Naciśnij dowolny klawisz, aby wrócić do menu…' -Y $y
+    Wait-Klawisz -Tekst 'Naciśnij dowolny klawisz, aby wrócić do menu…' -Y $uklad.WierszStopki
 }
 
 # --- Pozostałe akcje menu --------------------------------------------------
