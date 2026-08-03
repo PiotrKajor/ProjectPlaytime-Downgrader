@@ -21,31 +21,32 @@ Jeden plik do kliknięcia. Zero konfiguracji, zero zależności do zainstalowani
 
 ## Interfejs
 
-```
-════════════════════════════════════════════════════════════════════
-  PROJECT: PLAYTIME  ·  DOWNGRADER                          v2.1.1
-════════════════════════════════════════════════════════════════════
-  Pobieranie zawartości
+<div align="center">
 
-  Faza 2 · Incineration  (bez EasyAntiCheat)
-  manifest 1265526790874008598   ·   depot 1961461
+<img src="assets/screen-pobieranie.png" alt="Ekran pobierania zawartości" width="100%">
 
-  [████████████████████████████▊░░░░░░░░░░░░░░░░░░░░░]   43,72 %
+<sub>Pobieranie kompilacji — pasek postępu o rozdzielczości ósmej części znaku,<br>
+pomiar przepustowości, czas pozostały i przewijany dziennik plików</sub>
 
-    Pobrano   5,24 GB / 12,01 GB     Prędkość  18,4 MB/s
-    Czas      00:04:51               Pozostało 00:06:15
+<br><br>
 
-  ⠹  Poppy/Content/Paks/pakchunk3-WindowsNoEditor.pak
+<img src="assets/screen-podsumowanie.png" alt="Ekran podsumowania instalacji" width="100%">
 
-  ┌─ Dziennik ──────────────────────────────────────────────────┐
-  │ Poppy/Content/Paks/pakchunk1-WindowsNoEditor.sig            │
-  │ Poppy/Content/Paks/pakchunk2-WindowsNoEditor.pak            │
-  └─────────────────────────────────────────────────────────────┘
-```
+<sub>Podsumowanie — wykaz faktycznie wykonanych kroków, każdy z własnym stanem</sub>
 
-Menu obsługiwane strzałkami, ekran diagnostyki z animowaną listą kroków,
-pasek postępu o rozdzielczości ósmej części znaku, pomiar przepustowości
-i czasu pozostałego, przewijany dziennik pobieranych plików.
+<br><br>
+
+<img src="assets/screen-menu.png" alt="Menu główne" width="85%">
+
+<sub>Menu obsługiwane strzałkami; nagłówek pokazuje wykrytą instalację,<br>
+numer kompilacji i wolne miejsce na dysku</sub>
+
+</div>
+
+Układ dopasowuje się do rozmiaru okna — tekst jest zawijany na granicy słów,
+a zmiana wymiarów w trakcie pobierania powoduje przerysowanie ekranu od nowa.
+Postęp trafia też do tytułu okna, więc widać go na pasku zadań przy oknie
+zminimalizowanym.
 
 ---
 
