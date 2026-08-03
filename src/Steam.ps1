@@ -54,26 +54,81 @@ function Get-BibliotekaGry {
 
 function Get-WpisAcf {
     param([Parameter(Mandatory)][string]$Sciezka, [Parameter(Mandatory)][string]$Klucz)
-    foreach ($linia in [System.IO.File]::ReadAllLines($Sciezka)) {
-        if ($linia -match ('"{0}"\s+"(.*?)"' -f [regex]::Escape($Klucz))) { return $Matches[1] }
+    try {
+        foreach ($linia in [System.IO.File]::ReadAllLines($Sciezka)) {
+            if ($linia -match ('"{0}"\s+"(.*?)"' -f [regex]::Escape($Klucz))) { return $Matches[1] }
+        }
+    } catch {
+        # plik zajęty przez klienta Steam albo uszkodzony - brak wartości jest
+        # informacją samą w sobie, wywołujący ma przewidziane wartości zastępcze
+        return $null
     }
     return $null
 }
 
+function Test-TrescAcf {
+    <# Minimalna kontrola sensowności: bez niej można zapisać uszkodzony wpis. #>
+    param([string[]]$Wiersze)
+    if (-not $Wiersze -or $Wiersze.Count -lt 5) { return $false }
+    $polaczone = $Wiersze -join "`n"
+    if ($polaczone -notmatch '"AppState"') { return $false }
+    if ($polaczone -notmatch '"appid"')    { return $false }
+    # liczba nawiasów musi się zgadzać, inaczej struktura jest ucięta
+    $otwarte  = ([regex]::Matches($polaczone, '\{')).Count
+    $zamkniete = ([regex]::Matches($polaczone, '\}')).Count
+    return ($otwarte -gt 0 -and $otwarte -eq $zamkniete)
+}
+
+function Backup-Acf {
+    <#
+        Jednorazowa kopia oryginalnego wpisu, zakładana przed pierwszą modyfikacją.
+        Pozwala odtworzyć stan sprzed działania programu nawet wtedy, gdy katalog
+        gry został już podmieniony.
+    #>
+    param([Parameter(Mandatory)][string]$Sciezka)
+    try {
+        $kopia = "$Sciezka.oryginal"
+        if (-not [System.IO.File]::Exists($kopia) -and [System.IO.File]::Exists($Sciezka)) {
+            Copy-Item -LiteralPath $Sciezka -Destination $kopia -Force -ErrorAction Stop
+        }
+        return $kopia
+    } catch {
+        return $null
+    }
+}
+
 function Set-WpisAcf {
+    <#
+        Podmiana pojedynczej wartości we wpisie appmanifest.
+
+        Zapis jest dwuetapowy: najpierw powstaje plik tymczasowy, który dopiero po
+        pełnym zapisaniu zastępuje oryginał. Bezpośredni zapis oznaczałby, że awaria
+        zasilania albo błąd w połowie operacji zostawia klientowi Steam uszkodzony
+        wpis, a wraz z nim niedziałającą pozycję w bibliotece.
+    #>
     param(
         [Parameter(Mandatory)][string]$Sciezka,
         [Parameter(Mandatory)][string]$Klucz,
         [Parameter(Mandatory)][string]$Wartosc
     )
 
+    if (-not [System.IO.File]::Exists($Sciezka)) { return $false }
+
+    Backup-Acf -Sciezka $Sciezka | Out-Null
     Unlock-Acf -Sciezka $Sciezka
+
+    try {
+        $zrodlo = [System.IO.File]::ReadAllLines($Sciezka)
+    } catch {
+        return $false
+    }
+    if (-not (Test-TrescAcf -Wiersze $zrodlo)) { return $false }
 
     $wzorzec = '("{0}"\s+")(.*?)(")' -f [regex]::Escape($Klucz)
     $znaleziono = $false
     $wynik = New-Object System.Collections.Generic.List[string]
 
-    foreach ($linia in [System.IO.File]::ReadAllLines($Sciezka)) {
+    foreach ($linia in $zrodlo) {
         if ($linia -match $wzorzec) {
             $znaleziono = $true
             $wynik.Add(($linia -replace $wzorzec, ('${1}' + $Wartosc + '${3}')))
@@ -83,8 +138,24 @@ function Set-WpisAcf {
     }
 
     if (-not $znaleziono) { return $false }
-    [System.IO.File]::WriteAllLines($Sciezka, $wynik)
-    return $true
+    if (-not (Test-TrescAcf -Wiersze $wynik)) { return $false }
+
+    $tymczasowy = "$Sciezka.nowy"
+    try {
+        [System.IO.File]::WriteAllLines($tymczasowy, $wynik)
+
+        # kontrola po zapisie: dopiero zweryfikowany plik zastępuje oryginał
+        if (-not (Test-TrescAcf -Wiersze ([System.IO.File]::ReadAllLines($tymczasowy)))) {
+            throw 'zapisany plik nie przeszedł kontroli'
+        }
+
+        [System.IO.File]::Copy($tymczasowy, $Sciezka, $true)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $tymczasowy -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Unlock-Acf {
@@ -292,12 +363,24 @@ function Remove-CzesciowePobieranie {
 }
 
 function Get-ExeGry {
+    <#
+        Ścieżka wskazująca nieistniejący dysk sprawia, że PowerShell rozwiązuje
+        Get-ChildItem względem innego dostawcy, który nie zna parametru -File
+        i zgłasza błąd wiązania. Stąd wcześniejsze sprawdzenie istnienia katalogu
+        oraz osłona całości.
+    #>
     param([Parameter(Mandatory)][string]$KatalogGry)
+
     $wykluczone = 'UnrealCEFSubProcess|CrashReportClient|EasyAntiCheat|UnityCrashHandler|vc_redist|DXSETUP|Uninstall'
-    return Get-ChildItem -LiteralPath $KatalogGry -Filter '*.exe' -File -ErrorAction SilentlyContinue |
-           Where-Object { $_.Name -notmatch $wykluczone } |
-           Sort-Object Name |
-           Select-Object -First 1
+    try {
+        if (-not [System.IO.Directory]::Exists($KatalogGry)) { return $null }
+        return Get-ChildItem -LiteralPath $KatalogGry -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -notmatch $wykluczone } |
+               Sort-Object Name |
+               Select-Object -First 1
+    } catch {
+        return $null
+    }
 }
 
 function Stop-Steam {

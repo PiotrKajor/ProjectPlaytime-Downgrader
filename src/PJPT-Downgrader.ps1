@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v1.3.0'
+$Wersja  = 'v2.0.0'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -33,9 +33,18 @@ $BuildIdZapasowy = '12576441'
 # jest z wpisu installdir, ta wartość służy wyłącznie jako zabezpieczenie.
 $InstallDirZapasowy = 'Poppy Playtime - Multiplayer'
 
+# Narzędzie i token sesji trzymane są poza katalogiem programu. Dzięki temu
+# aktualizacja do nowej wersji nie oznacza ponownego pobierania 32 MB ani
+# ponownego logowania do Steam.
+$KatalogNarzedziDomyslny = [System.IO.Path]::Combine($PSScriptRoot, '..', 'tools')
+if ($env:LOCALAPPDATA) {
+    $KatalogNarzedziDomyslny = [System.IO.Path]::Combine($env:LOCALAPPDATA, 'ProjectPlaytime-Downgrader', 'tools')
+}
+
 $Katalogi = @{
-    Narzedzia = [System.IO.Path]::Combine($PSScriptRoot, '..', 'tools')
+    Narzedzia = $KatalogNarzedziDomyslny
     Dziennik  = [System.IO.Path]::Combine($PSScriptRoot, '..', 'logs')
+    Poprzednie = @([System.IO.Path]::Combine($PSScriptRoot, '..', 'tools'))
 }
 
 $Kompilacje = @(
@@ -212,7 +221,7 @@ function Show-DlaczegoLogowanie {
     }
 
     Write-Wiersz 2 (7 + $tresc.Count) (Format-Barwa 'Naciśnij dowolny klawisz…' 'Przygas')
-    [void][Console]::ReadKey($true)
+    [void](Read-Klawisz)
 }
 
 function Invoke-Logowanie {
@@ -289,7 +298,7 @@ function Invoke-Logowanie {
         $kandydaci = Get-NazwyKontZSesji -KatalogNarzedzi $Katalogi.Narzedzia
         Zapisz-Dziennik "Sesja QR: kandydatów na nazwę konta: $($kandydaci.Count)"
 
-        [Console]::CursorVisible = $false
+        Set-KursorWidoczny $false
         if ($kandydaci.Count -eq 1) {
             $uzytkownik = $kandydaci[0]
             $qr = $false
@@ -315,13 +324,13 @@ function Invoke-Logowanie {
 
             $wpis = (Read-Pole -Etykieta 'Nazwa konta Steam').Trim()
             if ($wpis) { $uzytkownik = $wpis; $qr = $false }
-            [Console]::CursorVisible = $false
+            Set-KursorWidoczny $false
         }
     }
 
     if ($uzytkownik) { Set-ZapamietaneKonto -KatalogNarzedzi $Katalogi.Narzedzia -Uzytkownik $uzytkownik }
 
-    [Console]::CursorVisible = $false
+    Set-KursorWidoczny $false
     return [pscustomobject]@{ Uzytkownik = $uzytkownik; Qr = $qr }
 }
 
@@ -346,7 +355,7 @@ function Show-Pobieranie {
     $yStat   = 10
     $yPlik   = 13
     $yLog    = 15
-    $wysLog  = [Math]::Max(5, [Console]::WindowHeight - $yLog - 3)
+    $wysLog  = [Math]::Max(5, (Get-WysokoscEkranu) - $yLog - 3)
     $szerLog = $szer - 4
 
     Draw-Ramka -X 2 -Y $yLog -Szerokosc $szerLog -Wysokosc $wysLog -Tytul 'Dziennik' -Barwa 'Szary'
@@ -403,7 +412,7 @@ function Show-Pobieranie {
                 for ($i = 0; $i -lt $ile; $i++) {
                     $idx = $od + $i
                     if ($idx -lt $stan.Dziennik.Count) { $tekst = $stan.Dziennik[$idx] } else { $tekst = '' }
-                    Write-Wiersz 4 ($yLog + 1 + $i) (Format-Barwa ('{0,-' + ($szerLog - 5) + '}' -f (Format-Skrot $tekst ($szerLog - 6))) 'Przygas')
+                    Write-Wiersz 4 ($yLog + 1 + $i) (Format-Barwa (Format-Pole (Format-Skrot $tekst ($szerLog - 6)) ($szerLog - 5)) 'Przygas')
                 }
             }
 
@@ -978,15 +987,44 @@ function Invoke-PelnaInstalacja {
         if (-not $ok) { return }
     }
 
+    $szerEkranu = Get-SzerokoscEkranu
     Clear-Ekran
     Draw-Naglowek -Podtytul 'Przygotowanie narzędzi' -Wersja $Wersja
     $kroki = New-ListaKrokow @('DepotDownloader')
     Draw-Kroki -Kroki $kroki -Y 6
     $kroki[0].Stan = 'trwa'; Draw-Kroki -Kroki $kroki -Y 6
 
+    Write-Wiersz 4 8 (Format-Barwa (Format-Skrot "Katalog: $($Katalogi.Narzedzia)" ($szerEkranu - 8)) 'Przygas')
+    Write-Wiersz 4 9 (Format-Barwa 'Pobierane jednorazowo — kolejne uruchomienia korzystają z tej kopii.' 'Przygas')
+
+    # Licznik animacji w zasięgu skryptu: inkrementacja wewnątrz scriptblocka
+    # utworzyłaby kopię lokalną i wskaźnik stałby w miejscu.
+    $script:KlatkaNarzedzia = 0
+
     try {
-        $exe = Get-DepotDownloader -KatalogNarzedzi $Katalogi.Narzedzia -Postep {
+        $exe = Get-DepotDownloader -KatalogNarzedzi $Katalogi.Narzedzia `
+                                   -KatalogiZrodlowe $Katalogi.Poprzednie `
+                                   -Postep {
             param($t) $kroki[0].Detal = $t; Draw-Kroki -Kroki $kroki -Y 6
+        } -PostepPobierania {
+            param($pobrane, $calosc, $predkosc)
+
+            $procent = 0
+            if ($calosc -gt 0) { $procent = $pobrane * 100.0 / $calosc }
+
+            Draw-Pasek -X 4 -Y 11 -Szerokosc ($szerEkranu - 16) -Procent $procent -Barwa 'Blekit'
+            Write-Wiersz ($szerEkranu - 11) 11 (Format-Barwa ('{0,6:N1} %' -f $procent) 'Bialy')
+
+            $opis = '{0} / {1}' -f (Format-Bajty $pobrane), (Format-Bajty $calosc)
+            if ($predkosc -gt 0) {
+                $opis += '   ·   {0}/s' -f (Format-Bajty $predkosc)
+                if ($calosc -gt $pobrane) {
+                    $opis += '   ·   pozostało {0}' -f (Format-Czas (($calosc - $pobrane) / $predkosc))
+                }
+            }
+            Clear-Wiersz 13 $szerEkranu
+            Write-Wiersz 6 13 ((Format-Barwa " $(Get-Spinner $script:KlatkaNarzedzia) " 'Czerwony') + (Format-Barwa $opis 'Bialy'))
+            $script:KlatkaNarzedzia++
         }
         $kroki[0].Stan = 'gotowe'; Draw-Kroki -Kroki $kroki -Y 6
     } catch {
@@ -1019,7 +1057,7 @@ function Invoke-PelnaInstalacja {
                                 -WorkingDirectory ([System.IO.Path]::GetDirectoryName($exe)) `
                                 -NoNewWindow -Wait -PassThru
         $kod = $procQr.ExitCode
-        [Console]::CursorVisible = $false
+        Set-KursorWidoczny $false
         if ($kod -ne 0) {
             Show-Komunikat -Wiersze @("DepotDownloader zakończył pracę z kodem $kod.") -Tytul 'Błąd' -Barwa 'Czerwony'
             return
@@ -1029,17 +1067,86 @@ function Invoke-PelnaInstalacja {
         if (-not $ok) { return }
     }
 
+    # Kontrola przed podmianą. Katalog gry zostanie za chwilę zastąpiony, więc jest to
+    # ostatni moment, w którym można się wycofać bez żadnych konsekwencji. Pobranie
+    # przerwane w połowie zostawia poprawny plik wykonywalny, ale bez zasobów, dlatego
+    # sprawdzany jest również łączny rozmiar.
+    $zastrzezenia = @()
     if (-not (Get-ExeGry -KatalogGry $katalogRoboczy)) {
-        Show-Komunikat -Wiersze @('W pobranych plikach brakuje pliku wykonywalnego gry.',
-                                  'Pobieranie jest niekompletne - uruchom je ponownie.') -Tytul 'Błąd' -Barwa 'Czerwony'
+        $zastrzezenia += 'brak pliku wykonywalnego gry'
+    }
+    $rozmiarPobrany = Get-RozmiarKatalogu -Sciezka $katalogRoboczy
+    if ($rozmiarPobrany -lt 1GB) {
+        $zastrzezenia += "pobrano tylko $(Format-Bajty $rozmiarPobrany), oczekiwano kilkunastu GB"
+    }
+
+    if ($zastrzezenia.Count -gt 0) {
+        Zapisz-Dziennik "Kontrola przed podmianą nie powiodła się: $($zastrzezenia -join '; ')"
+        Show-Komunikat -Wiersze (@('Pobrane pliki nie przeszły kontroli:', '') +
+                                 @($zastrzezenia | ForEach-Object { "  - $_" }) +
+                                 @('', 'Katalog gry pozostał nietknięty.',
+                                   'Uruchom pobieranie ponownie - zostanie wznowione.')) `
+                       -Tytul 'Przerwano przed podmianą' -Barwa 'Czerwony'
         return
     }
+    Zapisz-Dziennik "Kontrola przed podmianą: $(Format-Bajty $rozmiarPobrany), plik wykonywalny obecny"
 
     $wynik = Install-Kompilacja -Info $Info -KatalogZrodlowy $katalogRoboczy -Kompilacja $kompilacja
     if ($wynik) { Show-Podsumowanie -Wynik $wynik -Kompilacja $kompilacja }
 }
 
 # --- Menu główne -----------------------------------------------------------
+
+function Get-OpisWyjatku {
+    param([System.Management.Automation.ErrorRecord]$Blad)
+    $w = $Blad.Exception
+    $wiersze = New-Object System.Collections.Generic.List[string]
+    while ($w) {
+        $wiersze.Add(('{0}: {1}' -f $w.GetType().Name, $w.Message))
+        $w = $w.InnerException
+    }
+    if ($Blad.InvocationInfo -and $Blad.InvocationInfo.PositionMessage) {
+        foreach ($l in ($Blad.InvocationInfo.PositionMessage -split "`n")) {
+            $t = $l.Trim(); if ($t) { $wiersze.Add($t) }
+        }
+    }
+    return $wiersze
+}
+
+function Show-Awaria {
+    <#
+        Ostatnia linia obrony. Zamienia niewyłapany wyjątek w czytelny ekran, zapisuje
+        pełny ślad do dziennika i zatrzymuje program, aby okno nie zniknęło. Każdy krok
+        jest osłonięty, ponieważ rysowanie samo w sobie mogło być przyczyną awarii.
+    #>
+    param([System.Management.Automation.ErrorRecord]$Blad, [switch]$Krytyczna)
+
+    $opis = Get-OpisWyjatku -Blad $Blad
+    try {
+        Zapisz-Dziennik "AWARIA: $($opis -join ' | ')"
+        Zapisz-Dziennik "Ślad: $($Blad.ScriptStackTrace -replace "`r?`n", ' <- ')"
+    } catch { }
+
+    $wiersze = @('Wystąpił nieoczekiwany błąd.', '') + @($opis | Select-Object -First 6)
+    if ($script:PlikDziennika) { $wiersze += @('', "Pełny zapis: $($script:PlikDziennika)") }
+
+    $narysowano = $false
+    try {
+        Show-Komunikat -Wiersze $wiersze -Tytul $(if ($Krytyczna) { 'Błąd krytyczny' } else { 'Błąd' }) -Barwa 'Czerwony'
+        $narysowano = $true
+    } catch { }
+
+    # Gdyby rysowanie interfejsu zawiodło, pozostaje zwykły tekst - byle użytkownik
+    # cokolwiek zobaczył zamiast znikającego okna.
+    if (-not $narysowano) {
+        try { Restore-Console } catch { }
+        Write-Host ''
+        Write-Host '  BŁĄD:' -ForegroundColor Red
+        foreach ($w in $wiersze) { Write-Host "  $w" -ForegroundColor Gray }
+        Write-Host ''
+        try { [void](Read-Klawisz) } catch { Start-Sleep -Seconds 5 }
+    }
+}
 
 function Start-Aplikacja {
     Initialize-Tui
@@ -1071,18 +1178,29 @@ function Start-Aplikacja {
 
             $wybor = Show-Menu -Pozycje $pozycje -Tytul 'Menu główne' -Podtytul $podtytul -Wersja $Wersja -BezEscape
 
-            switch ($wybor) {
-                0 { Invoke-PelnaInstalacja      -Info $info }
-                1 { if ($info.Acf) { Invoke-NaprawaPrzycisku -Info $info } else { Show-Komunikat -Wiersze @('Brak pliku appmanifest.') -Tytul 'Błąd' -Barwa 'Czerwony' } }
-                2 { if ($info.Acf) { Invoke-Przywracanie     -Info $info } else { Show-Komunikat -Wiersze @('Brak pliku appmanifest.') -Tytul 'Błąd' -Barwa 'Czerwony' } }
-                3 { if ($info.Acf) { Invoke-ZarzadzanieKopiami -Info $info } else { Show-Komunikat -Wiersze @('Brak pliku appmanifest.') -Tytul 'Błąd' -Barwa 'Czerwony' } }
-                4 { $info = Show-Diagnostyka }
-                5 { return }
-            }
+            # Błąd pojedynczej operacji nie może zakończyć programu - jest pokazywany
+            # i sterowanie wraca do menu. Krytyczne pozostają tylko awarie samego menu.
+            try {
+                switch ($wybor) {
+                    0 { Invoke-PelnaInstalacja      -Info $info }
+                    1 { if ($info.Acf) { Invoke-NaprawaPrzycisku -Info $info } else { Show-Komunikat -Wiersze @('Brak pliku appmanifest.') -Tytul 'Błąd' -Barwa 'Czerwony' } }
+                    2 { if ($info.Acf) { Invoke-Przywracanie     -Info $info } else { Show-Komunikat -Wiersze @('Brak pliku appmanifest.') -Tytul 'Błąd' -Barwa 'Czerwony' } }
+                    3 { if ($info.Acf) { Invoke-ZarzadzanieKopiami -Info $info } else { Show-Komunikat -Wiersze @('Brak pliku appmanifest.') -Tytul 'Błąd' -Barwa 'Czerwony' } }
+                    4 { $info = Show-Diagnostyka }
+                    5 { return }
+                }
 
-            if ($wybor -in 0, 1, 2) { $info = Get-InfoGry -AppId $AppId }
+                if ($wybor -in 0, 1, 2) { $info = Get-InfoGry -AppId $AppId }
+            } catch {
+                Show-Awaria -Blad $_
+                try { $info = Get-InfoGry -AppId $AppId } catch { }
+            }
         }
+    } catch {
+        # Awaria poza obsługą pojedynczej akcji (np. w diagnostyce startowej lub menu).
+        Show-Awaria -Blad $_ -Krytyczna
     } finally {
+        try { Set-TytulOkna 'PROJECT: PLAYTIME - Downgrader' } catch { }
         Clear-Ekran
         Restore-Console
         Write-Host ''
@@ -1094,4 +1212,18 @@ function Start-Aplikacja {
     }
 }
 
-Start-Aplikacja
+# Bezpiecznik najwyższego poziomu: gdyby cokolwiek uciekło poza Start-Aplikacja,
+# okno i tak nie zniknie bez śladu.
+try {
+    Start-Aplikacja
+} catch {
+    try { Set-KursorWidoczny $true } catch { }
+    Write-Host ''
+    Write-Host '  Program zakończył się nieoczekiwanym błędem:' -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Gray
+    Write-Host ''
+    Write-Host '  Szczegóły zapisano w katalogu logs.' -ForegroundColor DarkGray
+    Write-Host ''
+    try { Read-Host '  Naciśnij Enter, aby zamknąć' } catch { Start-Sleep -Seconds 10 }
+    exit 1
+}

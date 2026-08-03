@@ -184,6 +184,61 @@ wykładniczo (`0,6 × poprzedni + 0,4 × bieżący`). Rozmiar całkowity szacowa
 jest z proporcji: `pobrane_bajty × 100 / procent`, a czas pozostały —
 z tempa dotychczasowego postępu.
 
+## Odporność na uszkodzenia
+
+Program wykonuje operacje nieodwracalne na cudzej instalacji gry, więc każde
+założenie o środowisku jest traktowane jako możliwe do złamania.
+
+### Konsola może nie istnieć
+
+Uruchomienie z potoku, jako zadanie w tle albo z przekierowanym wyjściem sprawia,
+że `SetCursorPosition`, `ReadKey` i `Clear` rzucają wyjątkiem, a `WindowWidth`
+zwraca wartość pustą. Ta ostatnia w arytmetyce staje się zerem i rozlewa się dalej
+na ujemne szerokości, a powtórzenie znaku ujemną liczbę razy to kolejny wyjątek —
+jedna niedostępna właściwość potrafiła w ten sposób wywrócić cały program.
+
+Każdy odczyt wymiaru przechodzi więc przez funkcję z wartością zastępczą
+i zakresem, powtórzenia znaków mają własną osłonę, a odczyt klawisza zwraca
+wartość pustą zamiast rzucać. Menu traktuje ją jako rezygnację, dzięki czemu brak
+klawiatury nie zamienia się w nieskończoną pętlę.
+
+### Wpis appmanifest nie może zostać uszkodzony
+
+Uszkodzony `appmanifest` oznacza dla użytkownika niedziałającą pozycję
+w bibliotece Steam, więc zapis jest dwuetapowy: treść trafia najpierw do pliku
+tymczasowego, po zapisie jest ponownie odczytywana i sprawdzana, i dopiero
+zweryfikowana zastępuje oryginał. Awaria w połowie operacji zostawia nietknięty
+plik wyjściowy.
+
+Przed pierwszą modyfikacją powstaje kopia `appmanifest_1961460.acf.oryginal`.
+Kontrola sensowności odrzuca treść bez bloku `AppState`, bez pola `appid` albo
+z niezrównoważonymi nawiasami — plik ucięty w połowie nie zostanie nadpisany,
+a plik zajęty przez klienta Steam kończy się odmową zapisu zamiast wyjątkiem.
+
+### Podmiana katalogu jest transakcyjna
+
+Bezpośrednio przed zastąpieniem katalogu gry sprawdzana jest obecność pliku
+wykonywalnego oraz łączny rozmiar pobranych danych. Pobranie przerwane w połowie
+zostawia poprawny plik `.exe`, ale bez zasobów, dlatego sam jego widok nie
+wystarcza. Niepowodzenie kontroli przerywa operację, zanim cokolwiek zostanie
+ruszone — katalog gry pozostaje nietknięty, a pobieranie da się wznowić.
+
+Jeśli przeniesienie mimo to zawiedzie, kopia zapasowa wraca na swoje miejsce.
+
+### Błąd nie kończy programu
+
+Obsługa jest trójwarstwowa: akcja menu, pętla główna i wywołanie najwyższego
+poziomu. Błąd pojedynczej operacji zostaje pokazany na ekranie i zapisany
+w dzienniku wraz ze śladem stosu, po czym sterowanie wraca do menu. Gdyby zawiodło
+samo rysowanie ekranu awarii, pozostaje wypisanie zwykłym tekstem — okno nie może
+zniknąć bez śladu.
+
+### Pobieranie narzędzia jest ponawiane
+
+Pobranie DepotDownloadera ponawiane jest trzykrotnie z rosnącą przerwą, a rozmiar
+gotowego pliku porównywany z zapowiedzianym przez wydanie. Niezgodność traktowana
+jest jak błąd, więc niekompletne archiwum nie trafi do rozpakowania.
+
 ## Bezpieczeństwo operacji na plikach
 
 - Biblioteki Steam na odłączonych dyskach są pomijane. Wykorzystanie

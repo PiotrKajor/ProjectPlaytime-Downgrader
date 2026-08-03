@@ -94,33 +94,83 @@ function Initialize-Tui {
         }
     } catch { }
 
-    try { [Console]::CursorVisible = $false } catch { }
-    $script:SzerokoscEkranu = [Math]::Min([Console]::WindowWidth, 100)
+    Set-KursorWidoczny $false
+    $script:SzerokoscEkranu = Get-SzerokoscEkranu
 }
 
 function Restore-Console {
-    try { [Console]::CursorVisible = $true } catch { }
-    if ($script:UseAnsi) { [Console]::Write((Get-Kod 'Reset')) }
+    Set-KursorWidoczny $true
+    if ($script:UseAnsi) { try { [Console]::Write((Get-Kod 'Reset')) } catch { } }
 }
 
-function Get-SzerokoscEkranu {
-    $w = 84
-    try { $w = [Math]::Min([Console]::WindowWidth, 100) } catch { }
-    if ($w -lt 60) { $w = 60 }
-    return $w
+function Set-KursorWidoczny {
+    param([bool]$Widoczny)
+    try { [Console]::CursorVisible = $Widoczny } catch { }
+}
+
+# --- Bezpieczny odczyt wymiarów --------------------------------------------
+#
+# Bez rzeczywistej konsoli (wyjście przekierowane, uruchomienie z potoku, zadanie
+# w tle) właściwości WindowWidth i WindowHeight albo rzucają wyjątkiem, albo
+# zwracają wartość pustą, która w arytmetyce staje się zerem. Zero szerokości
+# rozlewa się dalej na ujemne powtórzenia znaków, a te już rzucają wyjątkiem.
+# Dlatego każdy odczyt przechodzi przez funkcję z wartością zastępczą i zakresem.
+
+function Get-WymiarKonsoli {
+    param([string]$Nazwa, [int]$Domyslny, [int]$Min, [int]$Max)
+    $v = 0
+    try {
+        $surowy = [Console]::$Nazwa
+        if ($null -ne $surowy) { $v = [int]$surowy }
+    } catch { $v = 0 }
+    if ($v -le 0) { $v = $Domyslny }
+    if ($v -lt $Min) { $v = $Min }
+    if ($v -gt $Max) { $v = $Max }
+    return $v
+}
+
+function Get-SzerokoscEkranu { return (Get-WymiarKonsoli -Nazwa 'WindowWidth'  -Domyslny 84 -Min 60 -Max 100) }
+function Get-WysokoscEkranu  { return (Get-WymiarKonsoli -Nazwa 'WindowHeight' -Domyslny 30 -Min 24 -Max 200) }
+
+function Get-Powtorzenie {
+    <# Powtórzenie znaku nigdy nie może dostać ujemnej liczby - to wyjątek. #>
+    param([string]$Znak, [int]$Ile)
+    if ($Ile -le 0) { return '' }
+    if ($Ile -gt 500) { $Ile = 500 }
+    return $Znak * $Ile
+}
+
+function Format-Pole {
+    <# Wyrównanie do szerokości pola; ujemna szerokość w operatorze -f to wyjątek. #>
+    param([string]$Tekst, [int]$Szerokosc)
+    if ($null -eq $Tekst) { $Tekst = '' }
+    if ($Szerokosc -le 0) { return '' }
+    if ($Tekst.Length -ge $Szerokosc) { return $Tekst.Substring(0, $Szerokosc) }
+    return $Tekst + (Get-Powtorzenie ' ' ($Szerokosc - $Tekst.Length))
+}
+
+function Read-Klawisz {
+    <#
+        Bezpieczny odczyt klawisza. Bez konsoli ReadKey rzuca wyjątkiem, co bez
+        osłony kończyło program. Zwraca $null, gdy odczyt jest niemożliwy -
+        wywołujący musi to potraktować jako rezygnację, a nie zapętlić się.
+    #>
+    try { return [Console]::ReadKey($true) } catch { return $null }
 }
 
 # --- Prymitywy rysowania ---------------------------------------------------
 
 function Clear-Ekran {
-    try { [Console]::Clear() } catch { Clear-Host }
+    try { [Console]::Clear() } catch { try { Clear-Host } catch { } }
 }
 
 function Write-Wiersz {
     param([int]$X, [int]$Y, [string]$Tekst)
+    if ($null -eq $Tekst) { return }
     try {
-        if ($Y -lt 0 -or $Y -ge [Console]::WindowHeight) { return }
-        [Console]::SetCursorPosition([Math]::Max(0, $X), $Y)
+        if ($Y -lt 0 -or $Y -ge (Get-WysokoscEkranu)) { return }
+        if ($X -lt 0) { $X = 0 }
+        [Console]::SetCursorPosition($X, $Y)
         [Console]::Write($Tekst)
     } catch { }
 }
@@ -128,7 +178,7 @@ function Write-Wiersz {
 function Clear-Wiersz {
     param([int]$Y, [int]$Szerokosc = 0)
     if ($Szerokosc -le 0) { $Szerokosc = (Get-SzerokoscEkranu) }
-    Write-Wiersz 0 $Y (' ' * $Szerokosc)
+    Write-Wiersz 0 $Y (Get-Powtorzenie ' ' $Szerokosc)
 }
 
 function Write-Wysrodkowany {
@@ -144,11 +194,15 @@ function Draw-Ramka {
         [string]$Tytul = '',
         [string]$Barwa = 'Blekit'
     )
-    $gora = '┌' + ('─' * ($Szerokosc - 2)) + '┐'
+    # Ramka węższa niż cztery znaki albo niższa niż dwa wiersze nie ma sensu,
+    # a przy ujemnych wymiarach powtórzenie znaku rzuciłoby wyjątkiem.
+    if ($Szerokosc -lt 4 -or $Wysokosc -lt 2) { return }
+
+    $gora = '┌' + (Get-Powtorzenie '─' ($Szerokosc - 2)) + '┐'
     if ($Tytul) {
         $etykieta = " $Tytul "
         if ($etykieta.Length -lt $Szerokosc - 4) {
-            $gora = '┌─' + $etykieta + ('─' * ($Szerokosc - 3 - $etykieta.Length)) + '┐'
+            $gora = '┌─' + $etykieta + (Get-Powtorzenie '─' ($Szerokosc - 3 - $etykieta.Length)) + '┐'
         }
     }
     Write-Wiersz $X $Y (Format-Barwa $gora $Barwa)
@@ -156,7 +210,7 @@ function Draw-Ramka {
         Write-Wiersz $X ($Y + $i) (Format-Barwa '│' $Barwa)
         Write-Wiersz ($X + $Szerokosc - 1) ($Y + $i) (Format-Barwa '│' $Barwa)
     }
-    Write-Wiersz $X ($Y + $Wysokosc - 1) (Format-Barwa ('└' + ('─' * ($Szerokosc - 2)) + '┘') $Barwa)
+    Write-Wiersz $X ($Y + $Wysokosc - 1) (Format-Barwa ('└' + (Get-Powtorzenie '─' ($Szerokosc - 2)) + '┘') $Barwa)
 }
 
 function Draw-Naglowek {
@@ -165,14 +219,14 @@ function Draw-Naglowek {
     $szer = Get-SzerokoscEkranu
     $tytul = 'PROJECT: PLAYTIME  ·  DOWNGRADER'
 
-    Write-Wiersz 0 0 (Format-Barwa ('═' * $szer) 'Czerwony')
+    Write-Wiersz 0 0 (Format-Barwa (Get-Powtorzenie '═' $szer) 'Czerwony')
 
     $lewy  = "  $tytul"
     $prawy = if ($Wersja) { "$Wersja  " } else { '' }
-    $wypelniacz = ' ' * [Math]::Max(1, $szer - $lewy.Length - $prawy.Length)
+    $wypelniacz = Get-Powtorzenie ' ' ([Math]::Max(1, $szer - $lewy.Length - $prawy.Length))
     Write-Wiersz 0 1 ((Format-Barwa $lewy 'Pogrub') + (Format-Barwa '' 'Reset') + $wypelniacz + (Format-Barwa $prawy 'Szary'))
 
-    Write-Wiersz 0 2 (Format-Barwa ('═' * $szer) 'Czerwony')
+    Write-Wiersz 0 2 (Format-Barwa (Get-Powtorzenie '═' $szer) 'Czerwony')
 
     if ($Podtytul) {
         Clear-Wiersz 3
@@ -186,25 +240,37 @@ function Draw-Pasek {
         [double]$Procent,
         [string]$Barwa = 'Zielony'
     )
+    # Pasek węższy niż trzy znaki nie zmieściłby nawet nawiasów, a ujemne wnętrze
+    # rozsypałoby powtórzenia znaków.
+    if ($Szerokosc -lt 3) { return }
+
+    # Wartość spoza zakresu albo nieliczbowa (skutek dzielenia przez zero
+    # w obliczeniach postępu) zostaje sprowadzona do bezpiecznego przedziału.
+    if ([double]::IsNaN($Procent) -or [double]::IsInfinity($Procent)) { $Procent = 0 }
     if ($Procent -lt 0)   { $Procent = 0 }
     if ($Procent -gt 100) { $Procent = 100 }
 
     $wnetrze = $Szerokosc - 2
     $pelne   = [int][Math]::Floor($wnetrze * $Procent / 100)
-    $reszta  = ($wnetrze * $Procent / 100) - $pelne
+    if ($pelne -lt 0) { $pelne = 0 }
+    if ($pelne -gt $wnetrze) { $pelne = $wnetrze }
+    $reszta = ($wnetrze * $Procent / 100) - $pelne
 
     $czastki = @(' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉')
     $ostatni = ''
     if ($pelne -lt $wnetrze) {
-        $ostatni = $czastki[[int][Math]::Floor($reszta * 8)]
+        $indeks = [int][Math]::Floor($reszta * 8)
+        if ($indeks -lt 0) { $indeks = 0 }
+        if ($indeks -gt 7) { $indeks = 7 }
+        $ostatni = $czastki[$indeks]
     }
 
     $puste = $wnetrze - $pelne - $(if ($ostatni -and $ostatni -ne ' ') { 1 } else { 0 })
     if ($puste -lt 0) { $puste = 0 }
 
-    $tresc = (Format-Barwa ('█' * $pelne) $Barwa) +
+    $tresc = (Format-Barwa (Get-Powtorzenie '█' $pelne) $Barwa) +
              (Format-Barwa $ostatni $Barwa) +
-             (Format-Barwa ('░' * $puste) 'Szary')
+             (Format-Barwa (Get-Powtorzenie '░' $puste) 'Szary')
 
     Write-Wiersz $X $Y ((Format-Barwa '[' 'Szary') + $tresc + (Format-Barwa ']' 'Szary'))
 }
@@ -279,13 +345,19 @@ function Show-Menu {
         Zwraca indeks wybranej pozycji albo -1 przy naciśnięciu Esc.
     #>
     param(
-        [Parameter(Mandatory)] [array]$Pozycje,
+        # AllowEmptyCollection: pusta lista jest obsługiwana w ciele funkcji, a bez
+        # tego atrybutu walidacja parametru zgłosiłaby błąd, zanim tam dotrzemy
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$Pozycje,
         [string]$Tytul = '',
         [string]$Podtytul = '',
         [string]$Wersja = '',
         [int]$Zaznaczona = 0,
         [switch]$BezEscape
     )
+
+    # Menu bez pozycji zapętliłoby się na dzieleniu modulo przez zero.
+    if (-not $Pozycje -or $Pozycje.Count -eq 0) { return -1 }
+    if ($Zaznaczona -lt 0 -or $Zaznaczona -ge $Pozycje.Count) { $Zaznaczona = 0 }
 
     $szer = Get-SzerokoscEkranu
     Clear-Ekran
@@ -328,7 +400,12 @@ function Show-Menu {
         if (-not $BezEscape) { $podpowiedz += '    Esc powrót' }
         Write-Wiersz 2 $yStopka (Format-Barwa $podpowiedz 'Przygas')
 
-        $klawisz = [Console]::ReadKey($true)
+        # Brak możliwości odczytu klawisza oznacza brak konsoli interaktywnej.
+        # Zapętlanie się w takiej sytuacji zawiesiłoby program na zawsze,
+        # dlatego menu zwraca rezygnację.
+        $klawisz = Read-Klawisz
+        if ($null -eq $klawisz) { return -1 }
+
         switch ($klawisz.Key) {
             'UpArrow'   { $Zaznaczona = ($Zaznaczona - 1 + $Pozycje.Count) % $Pozycje.Count }
             'DownArrow' { $Zaznaczona = ($Zaznaczona + 1) % $Pozycje.Count }
@@ -354,11 +431,21 @@ function Show-Komunikat {
         [string]$Barwa = 'Blekit',
         [switch]$BezOczekiwania
     )
+    if ($null -eq $Wiersze) { $Wiersze = @() }
+
     $szer = Get-SzerokoscEkranu
+    $wysEkranu = Get-WysokoscEkranu
     $szerRamki = $szer - 4
+
+    # Komunikat dłuższy niż ekran zostaje przycięty - inaczej ramka wyszłaby
+    # poza bufor, a kolejne wiersze nadpisałyby ekran w przypadkowych miejscach.
+    $maksWierszy = [Math]::Max(1, $wysEkranu - 10)
+    if ($Wiersze.Count -gt $maksWierszy) {
+        $Wiersze = @($Wiersze | Select-Object -First ($maksWierszy - 1)) + '…'
+    }
     $wys = $Wiersze.Count + 4
 
-    $y = [Math]::Max(5, [int](([Console]::WindowHeight - $wys) / 2))
+    $y = [Math]::Max(5, [int](($wysEkranu - $wys) / 2))
     Draw-Ramka -X 2 -Y $y -Szerokosc $szerRamki -Wysokosc $wys -Tytul $Tytul -Barwa $Barwa
 
     for ($i = 0; $i -lt $Wiersze.Count; $i++) {
@@ -368,7 +455,7 @@ function Show-Komunikat {
     if (-not $BezOczekiwania) {
         Write-Wiersz 4 ($y + $wys) (Format-Barwa 'Naciśnij dowolny klawisz, aby kontynuować…' 'Przygas')
         Clear-BuforKlawiatury
-        [void][Console]::ReadKey($true)
+        [void](Read-Klawisz)
     }
 }
 
@@ -390,24 +477,37 @@ function Read-Pole {
     param([string]$Etykieta, [switch]$Ukryte)
 
     $szer = Get-SzerokoscEkranu
-    $y = [Console]::WindowHeight - 4
+    $y = [Math]::Max(5, (Get-WysokoscEkranu) - 4)
     Clear-Wiersz $y $szer
     Clear-Wiersz ($y + 1) $szer
     Write-Wiersz 2 $y (Format-Barwa $Etykieta 'Blekit')
     Write-Wiersz 2 ($y + 1) (Format-Barwa '› ' 'Czerwony')
 
     try { [Console]::SetCursorPosition(4, $y + 1) } catch { }
-    try { [Console]::CursorVisible = $true } catch { }
+    Set-KursorWidoczny $true
 
-    if ($Ukryte) {
-        $bezpieczne = Read-Host -AsSecureString
-        $wartosc = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($bezpieczne))
-    } else {
-        $wartosc = Read-Host
+    # Read-Host bez konsoli natychmiast napotyka koniec strumienia i rzuca wyjątkiem;
+    # pusta odpowiedź jest wtedy jedyną sensowną wartością.
+    $wartosc = ''
+    try {
+        if ($Ukryte) {
+            $bezpieczne = Read-Host -AsSecureString
+            $wskaznik = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($bezpieczne)
+            try {
+                $wartosc = [Runtime.InteropServices.Marshal]::PtrToStringAuto($wskaznik)
+            } finally {
+                # zwolnienie pamięci niezarządzanej z hasłem
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($wskaznik)
+            }
+        } else {
+            $wartosc = Read-Host
+        }
+    } catch {
+        $wartosc = ''
     }
 
-    try { [Console]::CursorVisible = $false } catch { }
+    Set-KursorWidoczny $false
+    if ($null -eq $wartosc) { return '' }
     return $wartosc
 }
 

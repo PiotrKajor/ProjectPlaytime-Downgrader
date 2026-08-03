@@ -82,6 +82,59 @@ function Test-ZapisanaSesja {
     return [System.IO.File]::Exists([System.IO.Path]::Combine($KatalogNarzedzi, 'account.config'))
 }
 
+function Save-PlikZPostepem {
+    <#
+        Pobiera plik, raportując postęp w trakcie. Invoke-WebRequest zwraca sterowanie
+        dopiero po zakończeniu, więc przy wolnym łączu program wygląda na zawieszony.
+        Ręczne kopiowanie strumienia pozwala odświeżać ekran na bieżąco.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Cel,
+        [scriptblock]$Postep,
+        [int]$OkresMs = 150
+    )
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    $zadanie = [System.Net.HttpWebRequest]::Create($Url)
+    $zadanie.UserAgent        = 'ProjectPlaytime-Downgrader'
+    $zadanie.Timeout          = 30000
+    $zadanie.ReadWriteTimeout = 120000
+
+    $odpowiedz = $zadanie.GetResponse()
+    try {
+        $calosc  = $odpowiedz.ContentLength
+        $wejscie = $odpowiedz.GetResponseStream()
+        $wyjscie = [System.IO.File]::Create($Cel)
+        try {
+            $bufor   = New-Object byte[] 262144
+            $pobrane = 0L
+            $start   = Get-Date
+            $ostatni = Get-Date
+
+            while (($n = $wejscie.Read($bufor, 0, $bufor.Length)) -gt 0) {
+                $wyjscie.Write($bufor, 0, $n)
+                $pobrane += $n
+
+                if ($Postep -and ((Get-Date) - $ostatni).TotalMilliseconds -ge $OkresMs) {
+                    $ostatni = Get-Date
+                    $sekundy = ((Get-Date) - $start).TotalSeconds
+                    $predkosc = 0
+                    if ($sekundy -gt 0) { $predkosc = $pobrane / $sekundy }
+                    & $Postep $pobrane $calosc $predkosc
+                }
+            }
+            if ($Postep) { & $Postep $pobrane $calosc 0 }
+        } finally {
+            $wyjscie.Dispose()
+            $wejscie.Dispose()
+        }
+    } finally {
+        $odpowiedz.Dispose()
+    }
+}
+
 function Get-DepotDownloader {
     <#
         Zwraca ścieżkę do DepotDownloader.exe, pobierając narzędzie z GitHuba,
@@ -90,7 +143,9 @@ function Get-DepotDownloader {
     #>
     param(
         [Parameter(Mandatory)][string]$KatalogNarzedzi,
-        [scriptblock]$Postep
+        [scriptblock]$Postep,
+        [scriptblock]$PostepPobierania,
+        [string[]]$KatalogiZrodlowe = @()
     )
 
     function Raport { param($t) if ($Postep) { & $Postep $t } }
@@ -99,6 +154,27 @@ function Get-DepotDownloader {
     if ([System.IO.File]::Exists($exe)) {
         Raport 'narzędzie już dostępne'
         return $exe
+    }
+
+    # Przeniesienie z poprzedniego układu katalogów oszczędza ponowne pobranie
+    # 32 MB oraz zachowuje zapisany token sesji.
+    foreach ($zrodlo in $KatalogiZrodlowe) {
+        try {
+            $stary = [System.IO.Path]::Combine($zrodlo, 'DepotDownloader.exe')
+            if (-not [System.IO.File]::Exists($stary)) { continue }
+
+            New-Item -ItemType Directory -Path $KatalogNarzedzi -Force | Out-Null
+            foreach ($plik in [System.IO.Directory]::EnumerateFiles($zrodlo)) {
+                $docelowy = [System.IO.Path]::Combine($KatalogNarzedzi, [System.IO.Path]::GetFileName($plik))
+                if (-not [System.IO.File]::Exists($docelowy)) {
+                    Copy-Item -LiteralPath $plik -Destination $docelowy -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if ([System.IO.File]::Exists($exe)) {
+                Raport 'przeniesiono z poprzedniej instalacji'
+                return $exe
+            }
+        } catch { }
     }
 
     if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { $arch = 'windows-arm64' } else { $arch = 'windows-x64' }
@@ -115,12 +191,26 @@ function Get-DepotDownloader {
     $zip = [System.IO.Path]::Combine($KatalogNarzedzi, $zasob.name)
 
     Raport "$($wydanie.tag_name), $([Math]::Round($zasob.size / 1MB, 1)) MB"
-    $poprzedni = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-    try {
-        Invoke-WebRequest -Uri $zasob.browser_download_url -OutFile $zip -UseBasicParsing
-    } finally {
-        $ProgressPreference = $poprzedni
+
+    # Ponawianie chroni przed zerwaniem wolnego lub chwiejnego łącza. Częściowy plik
+    # jest usuwany, aby kolejna próba zaczynała się od zera.
+    $proby = 3
+    for ($p = 1; $p -le $proby; $p++) {
+        try {
+            Save-PlikZPostepem -Url $zasob.browser_download_url -Cel $zip -Postep $PostepPobierania
+
+            if ((Get-Item -LiteralPath $zip).Length -ne $zasob.size) {
+                throw "pobrano $((Get-Item -LiteralPath $zip).Length) z $($zasob.size) bajtów"
+            }
+            break
+        } catch {
+            Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+            if ($p -ge $proby) {
+                throw "Pobieranie DepotDownloadera nie powiodło się po $proby próbach: $($_.Exception.Message)"
+            }
+            Raport "próba $p nie powiodła się, ponawiam za chwilę"
+            Start-Sleep -Seconds (2 * $p)
+        }
     }
 
     Raport 'rozpakowywanie'
