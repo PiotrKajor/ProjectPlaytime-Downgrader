@@ -171,6 +171,154 @@ function Lock-Acf {
     try { (Get-Item -LiteralPath $Sciezka -Force).IsReadOnly = $Zablokuj } catch { }
 }
 
+function Get-InfoDepotu {
+    <#
+        Zwraca dane bieżącej publicznej wersji depotu: identyfikator manifestu,
+        rozmiar po rozpakowaniu oraz rozmiar pobierania. Klient Steam porównuje
+        z nimi zawartość wpisu appmanifest.
+    #>
+    param([Parameter(Mandatory)][int]$AppId, [Parameter(Mandatory)][int]$DepotId, [int]$TimeoutSek = 15)
+    try {
+        $odp = Invoke-RestMethod -Uri "https://api.steamcmd.net/v1/info/$AppId" `
+                                 -TimeoutSec $TimeoutSek -UseBasicParsing -ErrorAction Stop
+        $pub = $odp.data.$AppId.depots.$DepotId.manifests.public
+        if (-not $pub -or -not $pub.gid) { return $null }
+        return [pscustomobject]@{
+            Gid       = [string]$pub.gid
+            Rozmiar   = [long]$pub.size
+            Pobieranie= [long]$pub.download
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Set-StanZainstalowany {
+    <#
+        Zapisuje we wpisie appmanifest spójny stan „gra zainstalowana i aktualna”.
+
+        Samo ustawienie buildid nie wystarcza. Klient Steam sprawdza przede wszystkim
+        listę InstalledDepots: dopóki jest pusta, uznaje, że żaden depot nie jest
+        zainstalowany, dopisuje do StateFlags bit wymaganej aktualizacji i żąda
+        pobrania całości niezależnie od numeru kompilacji. Tak samo traktuje zerowe
+        SizeOnDisk oraz BytesDownloaded mniejsze od BytesToDownload.
+
+        Wszystkie pola zapisywane są w jednym przebiegu, a plik podmieniany atomowo -
+        wpis w żadnym momencie nie pozostaje w stanie częściowo zmienionym.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Acf,
+        [Parameter(Mandatory)][int]$DepotId,
+        [string]$BuildId,
+        [string]$ManifestGid,
+        [long]$RozmiarNaDysku = 0,
+        [long]$RozmiarPobierania = 0
+    )
+
+    if (-not [System.IO.File]::Exists($Acf)) { return $null }
+
+    Backup-Acf -Sciezka $Acf | Out-Null
+    Unlock-Acf -Sciezka $Acf
+
+    try { $zrodlo = [System.IO.File]::ReadAllLines($Acf) } catch { return $null }
+    if (-not (Test-TrescAcf -Wiersze $zrodlo)) { return $null }
+
+    if ($RozmiarPobierania -le 0) { $RozmiarPobierania = $RozmiarNaDysku }
+    $teraz = [int][double]::Parse((Get-Date -UFormat %s))
+
+    $pola = [ordered]@{
+        'StateFlags'          = '4'
+        'AutoUpdateBehavior'  = '1'
+        'ScheduledAutoUpdate' = '0'
+        'UpdateResult'        = '0'
+        'DownloadType'        = '1'
+        'LastUpdated'         = "$teraz"
+    }
+    if ($BuildId) {
+        $pola['buildid']       = $BuildId
+        $pola['TargetBuildID'] = $BuildId
+    }
+    if ($RozmiarNaDysku -gt 0) {
+        $pola['SizeOnDisk']      = "$RozmiarNaDysku"
+        $pola['BytesToStage']    = "$RozmiarNaDysku"
+        $pola['BytesStaged']     = "$RozmiarNaDysku"
+        $pola['BytesToDownload'] = "$RozmiarPobierania"
+        $pola['BytesDownloaded'] = "$RozmiarPobierania"
+    }
+
+    $wynik = New-Object System.Collections.Generic.List[string]
+    $zmienione = New-Object System.Collections.Generic.List[string]
+    $blokZapisany = $false
+
+    $i = 0
+    while ($i -lt $zrodlo.Count) {
+        $linia = $zrodlo[$i]
+
+        # Blok InstalledDepots wymaga podmiany w całości, nie pojedynczej wartości.
+        if ($ManifestGid -and $linia -match '^\s*"InstalledDepots"\s*$') {
+            $wynik.Add($linia)
+            $i++
+
+            if ($i -lt $zrodlo.Count -and $zrodlo[$i] -match '^\s*\{\s*$') {
+                $glebokosc = 1
+                $i++
+                while ($i -lt $zrodlo.Count -and $glebokosc -gt 0) {
+                    $glebokosc += ([regex]::Matches($zrodlo[$i], '\{')).Count
+                    $glebokosc -= ([regex]::Matches($zrodlo[$i], '\}')).Count
+                    $i++
+                }
+            }
+
+            $rozmiarWpisu = $RozmiarNaDysku
+            if ($rozmiarWpisu -le 0) { $rozmiarWpisu = 0 }
+            $wynik.Add("`t{")
+            $wynik.Add("`t`t`"$DepotId`"")
+            $wynik.Add("`t`t{")
+            $wynik.Add("`t`t`t`"manifest`"`t`t`"$ManifestGid`"")
+            $wynik.Add("`t`t`t`"size`"`t`t`"$rozmiarWpisu`"")
+            $wynik.Add("`t`t}")
+            $wynik.Add("`t}")
+            $blokZapisany = $true
+            continue
+        }
+
+        $podmieniona = $false
+        foreach ($klucz in $pola.Keys) {
+            $wzorzec = '("{0}"\s+")(.*?)(")' -f [regex]::Escape($klucz)
+            if ($linia -match $wzorzec) {
+                $wynik.Add(($linia -replace $wzorzec, ('${1}' + $pola[$klucz] + '${3}')))
+                if (-not $zmienione.Contains($klucz)) { $zmienione.Add($klucz) }
+                $podmieniona = $true
+                break
+            }
+        }
+        if (-not $podmieniona) { $wynik.Add($linia) }
+        $i++
+    }
+
+    if (-not (Test-TrescAcf -Wiersze $wynik)) { return $null }
+
+    $tymczasowy = "$Acf.nowy"
+    try {
+        [System.IO.File]::WriteAllLines($tymczasowy, $wynik)
+        if (-not (Test-TrescAcf -Wiersze ([System.IO.File]::ReadAllLines($tymczasowy)))) {
+            throw 'zapisany plik nie przeszedł kontroli'
+        }
+        [System.IO.File]::Copy($tymczasowy, $Acf, $true)
+    } catch {
+        return $null
+    } finally {
+        Remove-Item -LiteralPath $tymczasowy -Force -ErrorAction SilentlyContinue
+    }
+
+    return [pscustomobject]@{
+        Pola          = $zmienione.ToArray()
+        DepotZapisany = $blokZapisany
+        Manifest      = $ManifestGid
+        Rozmiar       = $RozmiarNaDysku
+    }
+}
+
 function Get-AktualnyBuildId {
     <#
         Odpytuje publiczne API steamcmd o identyfikator kompilacji gałęzi "public".
@@ -428,6 +576,49 @@ function New-SkrotPulpitu {
     } catch {
         return $null
     }
+}
+
+function Invoke-NaprawaWpisu {
+    <#
+        Pełna naprawa wpisu: pobiera dane bieżącej wersji depotu, mierzy katalog gry
+        i zapisuje spójny stan „zainstalowana i aktualna”. Zwraca opis wykonanych
+        zmian albo $null, jeśli zapis się nie powiódł.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Acf,
+        [Parameter(Mandatory)][int]$AppId,
+        [Parameter(Mandatory)][int]$DepotId,
+        [string]$KatalogGry,
+        [string]$BuildIdZapasowy,
+        [scriptblock]$Postep
+    )
+
+    function Raport { param($t) if ($Postep) { & $Postep $t } }
+
+    Raport 'odpytywanie api.steamcmd.net'
+    $build = Get-AktualnyBuildId -AppId $AppId
+    if (-not $build) { $build = $BuildIdZapasowy }
+
+    $depot = Get-InfoDepotu -AppId $AppId -DepotId $DepotId
+
+    # Rozmiar z API opisuje pełną, nieuszkodzoną zawartość depotu i jest
+    # wiarygodniejszy niż pomiar katalogu, który może być w trakcie zmian.
+    $rozmiar = 0L
+    $pobieranie = 0L
+    if ($depot) {
+        $rozmiar    = $depot.Rozmiar
+        $pobieranie = $depot.Pobieranie
+    } elseif ($KatalogGry) {
+        Raport 'brak łączności, pomiar katalogu'
+        $rozmiar = Get-RozmiarKatalogu -Sciezka $KatalogGry
+    }
+
+    $gid = $null
+    if ($depot) { $gid = $depot.Gid }
+
+    Raport 'zapis wpisu'
+    return Set-StanZainstalowany -Acf $Acf -DepotId $DepotId -BuildId $build `
+                                 -ManifestGid $gid -RozmiarNaDysku $rozmiar -RozmiarPobierania $pobieranie
 }
 
 function Set-BlokadaAktualizacji {

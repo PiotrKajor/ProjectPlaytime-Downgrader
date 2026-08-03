@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Stop'
 
 # --- Konfiguracja ----------------------------------------------------------
 
-$Wersja  = 'v2.0.1'
+$Wersja  = 'v2.1.0'
 $AppId   = 1961460
 $DepotId = 1961461
 
@@ -54,8 +54,11 @@ $Kompilacje = @(
         Manifest = '1265526790874008598'
     }
     [pscustomobject]@{
-        Etykieta = 'Faza 2 · Incineration  (z EasyAntiCheat)'
-        Opis     = 'Wariant z anticheatem. Wyłącznie Windows. Około 12 GB.'
+        # Ten manifest jest jednocześnie bieżącą kompilacją publiczną - API zwraca
+        # go jako depots.1961461.manifests.public.gid. Gra zakończyła życie na
+        # Fazie 2 z anticheatem, więc jego instalacja niczego nie cofa.
+        Etykieta = 'Faza 2 · Incineration  (z EasyAntiCheat) — wersja bieżąca'
+        Opis     = 'Odpowiada aktualnej kompilacji na Steam. Nie jest cofnięciem wersji.'
         Manifest = '1362072626294775891'
     }
     [pscustomobject]@{
@@ -536,15 +539,21 @@ function Install-Kompilacja {
         return $null
     }
 
-    # 4 — identyfikator pobierany na bieżąco; stan z ekranu diagnostyki mógł się
-    #     zdezaktualizować, a wpisanie złej wartości od razu wywołałoby aktualizację
-    & $ustaw 3 'trwa' 'odpytywanie api.steamcmd.net'
-    $build = Get-AktualnyBuildId -AppId $AppId
-    if (-not $build) { $build = $Info.BuildIdZdalny }
-    if (-not $build) { $build = $BuildIdZapasowy }
-    $zmiany = Set-BlokadaAktualizacji -Acf $Info.Acf -BuildId $build
-    & $ustaw 3 'gotowe' "buildid $build, StateFlags 4"
-    Zapisz-Dziennik "Blokada aktualizacji: $(($zmiany.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', ')"
+    # 4 — pełny, spójny stan wpisu. Sam buildid nie wystarcza: dopóki lista
+    #     InstalledDepots jest pusta, klient Steam żąda pobrania całości.
+    & $ustaw 3 'trwa' ''
+    $naprawa = Invoke-NaprawaWpisu -Acf $Info.Acf -AppId $AppId -DepotId $DepotId `
+                                   -KatalogGry $Info.KatalogGry -BuildIdZapasowy $BuildIdZapasowy `
+                                   -Postep { param($t) & $ustaw 3 'trwa' $t }
+
+    $build = Get-WpisAcf -Sciezka $Info.Acf -Klucz 'buildid'
+    if ($naprawa) {
+        & $ustaw 3 'gotowe' "buildid $build, StateFlags 4, depot zapisany"
+        Zapisz-Dziennik "Naprawa wpisu: pola=$($naprawa.Pola -join ','), manifest=$($naprawa.Manifest), rozmiar=$($naprawa.Rozmiar)"
+    } else {
+        & $ustaw 3 'blad' 'nie udało się zapisać wpisu'
+        Zapisz-Dziennik 'Naprawa wpisu nie powiodła się'
+    }
 
     # 5
     & $ustaw 4 'trwa' ''
@@ -721,13 +730,25 @@ function Invoke-NaprawaPrzycisku {
     $build = Get-AktualnyBuildId -AppId $AppId
     if (-not $build) { $build = $BuildIdZapasowy }
 
+    $stanFlag = Get-WpisAcf -Sciezka $Info.Acf -Klucz 'StateFlags'
+    $depotyPuste = $false
+    try {
+        $tresc = [System.IO.File]::ReadAllText($Info.Acf)
+        $depotyPuste = ($tresc -match '(?s)"InstalledDepots"\s*\{\s*\}')
+    } catch { }
+
     $opis = @(
-        'Operacja zapisuje w pliku appmanifest informację, że instalacja jest',
-        'kompletna i zgodna z bieżącą kompilacją publiczną. Pliki gry pozostają',
-        'nietknięte, więc Steam przestaje planować aktualizację.',
+        'Klient Steam nie ocenia instalacji wyłącznie po numerze kompilacji.',
+        'Sprawdza także listę zainstalowanych depotów, rozmiar na dysku oraz',
+        'licznik pobranych bajtów. Pusta lista depotów oznacza dla niego, że',
+        'nic nie jest zainstalowane, i wymusza pobranie całości.',
+        '',
+        'Operacja zapisuje wszystkie te pola naraz, spójnie ze sobą.',
         '',
         "Bieżąca kompilacja publiczna: $build",
-        "Zapisana w appmanifest:       $($Info.BuildIdLokalny)"
+        "Zapisana w appmanifest:       $($Info.BuildIdLokalny)",
+        "StateFlags:                   $stanFlag$(if ($stanFlag -eq '6') { '  (4 zainstalowana + 2 wymagana aktualizacja)' } else { '' })",
+        "Lista depotów:                $(if ($depotyPuste) { 'PUSTA - to jest przyczyna' } else { 'wypełniona' })"
     )
     for ($i = 0; $i -lt $opis.Count; $i++) {
         Write-Wiersz 4 (5 + $i) (Format-Barwa (Format-Skrot $opis[$i] ($szer - 8)) 'Bialy')
@@ -742,11 +763,28 @@ function Invoke-NaprawaPrzycisku {
         return
     }
 
-    $zmiany = Set-BlokadaAktualizacji -Acf $Info.Acf -BuildId $build
-    Zapisz-Dziennik "Naprawa przycisku: $(($zmiany.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', ')"
+    $naprawa = Invoke-NaprawaWpisu -Acf $Info.Acf -AppId $AppId -DepotId $DepotId `
+                                   -KatalogGry $Info.KatalogGry -BuildIdZapasowy $BuildIdZapasowy
 
-    $wiersze = @('Zapisane wartości:', '')
-    foreach ($z in $zmiany.GetEnumerator()) { $wiersze += "  $($z.Key) = $($z.Value)" }
+    if (-not $naprawa) {
+        Zapisz-Dziennik 'Naprawa przycisku nie powiodła się'
+        Show-Komunikat -Wiersze @('Nie udało się zapisać wpisu appmanifest.', '',
+                                  'Sprawdź, czy klient Steam jest zamknięty,',
+                                  'a plik nie jest ustawiony jako tylko do odczytu.') `
+                       -Tytul 'Nie powiodło się' -Barwa 'Czerwony'
+        return
+    }
+
+    Zapisz-Dziennik "Naprawa przycisku: pola=$($naprawa.Pola -join ','), manifest=$($naprawa.Manifest), rozmiar=$($naprawa.Rozmiar)"
+
+    $wiersze = @('Wpis appmanifest zapisany.', '')
+    $wiersze += "  StateFlags       = $(Get-WpisAcf -Sciezka $Info.Acf -Klucz 'StateFlags')"
+    $wiersze += "  buildid          = $(Get-WpisAcf -Sciezka $Info.Acf -Klucz 'buildid')"
+    $wiersze += "  SizeOnDisk       = $(Get-WpisAcf -Sciezka $Info.Acf -Klucz 'SizeOnDisk')"
+    $wiersze += "  BytesDownloaded  = $(Get-WpisAcf -Sciezka $Info.Acf -Klucz 'BytesDownloaded')"
+    if ($naprawa.DepotZapisany) { $wiersze += "  depot $DepotId  -> manifest $($naprawa.Manifest)" }
+    $wiersze += @('', 'Uruchom Steam i sprawdź, czy przycisk pokazuje „Graj”.')
+
     Show-Komunikat -Wiersze $wiersze -Tytul 'Gotowe' -Barwa 'Zielony'
 }
 

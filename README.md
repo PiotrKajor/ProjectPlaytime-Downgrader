@@ -6,7 +6,7 @@
 
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
-![Wersja](https://img.shields.io/badge/wersja-2.0.1-D42E33?style=for-the-badge)
+![Wersja](https://img.shields.io/badge/wersja-2.1.0-D42E33?style=for-the-badge)
 ![Licencja](https://img.shields.io/badge/licencja-MIT-ECB524?style=for-the-badge)
 
 **Instalator starszych kompilacji gry PROJECT: PLAYTIME.**
@@ -23,7 +23,7 @@ Jeden plik do kliknięcia. Zero konfiguracji, zero zależności do zainstalowani
 
 ```
 ════════════════════════════════════════════════════════════════════
-  PROJECT: PLAYTIME  ·  DOWNGRADER                          v2.0.1
+  PROJECT: PLAYTIME  ·  DOWNGRADER                          v2.1.0
 ════════════════════════════════════════════════════════════════════
   Pobieranie zawartości
 
@@ -73,15 +73,29 @@ pobranymi z serwera. Sumy kontrolne plików liczy dopiero po ręcznym uruchomien
 opcji _Sprawdź spójność plików gry_.
 
 Program zapisuje więc w appmanifest stan „instalacja kompletna i aktualna”,
-podczas gdy na dysku leżą pliki starszej kompilacji:
+podczas gdy na dysku leżą pliki starszej kompilacji.
+
+> [!IMPORTANT]
+> Samo ustawienie `buildid` **nie wystarcza**. Klient sprawdza cały zestaw pól
+> i musi je zobaczyć spójne ze sobą. Najważniejsza jest lista `InstalledDepots`:
+> dopóki jest pusta, Steam uznaje, że żaden depot nie jest zainstalowany, dopisuje
+> do `StateFlags` bit wymaganej aktualizacji i żąda pobrania całości — niezależnie
+> od numeru kompilacji.
 
 | Wpis | Wartość | Znaczenie |
 |:--|:--|:--|
-| `buildid` | bieżąca kompilacja publiczna | Steam uznaje instalację za aktualną |
-| `StateFlags` | `4` | stan „w pełni zainstalowana” |
-| `TargetBuildID` | `0` | brak zaplanowanej kompilacji docelowej |
+| `InstalledDepots` | depot z identyfikatorem manifestu bieżącej wersji | **kluczowe** — pusta lista wymusza pełne pobranie |
+| `StateFlags` | `4` | „w pełni zainstalowana”; wartość `6` to `4` + bit wymaganej aktualizacji |
+| `buildid`, `TargetBuildID` | bieżąca kompilacja publiczna | zgodność z wersją na serwerze |
+| `SizeOnDisk`, `BytesToStage`, `BytesStaged` | rozmiar zawartości depotu | zero oznacza dla klienta pustą instalację |
+| `BytesDownloaded` | równe `BytesToDownload` | pobieranie ukończone w stu procentach |
+| `LastUpdated` | znacznik czasu | zero wygląda jak instalacja nigdy niedokończona |
+| `DownloadType` | `1` | zwykła instalacja zamiast oczekującego pobierania |
 | `AutoUpdateBehavior` | `1` | brak aktualizacji w tle |
-| `ScheduledAutoUpdate` | `0` | usunięcie zaplanowanego zadania |
+
+Wartości manifestu i rozmiarów pobierane są z `api.steamcmd.net`, z pola
+`depots.1961461.manifests.public`. Wszystkie pola zapisywane są w jednym przebiegu,
+a plik podmieniany atomowo.
 
 Efekt: **Graj** uruchamia grę natychmiast, bez pobierania czegokolwiek.
 
@@ -134,10 +148,15 @@ pobierania prowadzonego przez samego Steam.
 
 ## Dostępne kompilacje
 
-| Wersja | Manifest |
-|:--|:--|
-| Faza 2 · Incineration — bez EasyAntiCheat | `1265526790874008598` |
-| Faza 2 · Incineration — z EasyAntiCheat | `1362072626294775891` |
+| Wersja | Manifest | Uwaga |
+|:--|:--|:--|
+| Faza 2 · Incineration — bez EasyAntiCheat | `1265526790874008598` | faktyczne cofnięcie wersji |
+| Faza 2 · Incineration — z EasyAntiCheat | `1362072626294775891` | **to jest wersja bieżąca** |
+
+Drugi manifest odpowiada bieżącej kompilacji publicznej — API zwraca go jako
+`depots.1961461.manifests.public.gid`. Gra zakończyła życie na Fazie 2
+z anticheatem, więc jej zainstalowanie niczego nie cofa; pozycja pozostaje
+w menu na wypadek, gdyby ktoś chciał wrócić do stanu wyjściowego.
 
 W menu można podać dowolny inny identyfikator. Pełna lista kompilacji wraz
 z datami: [SteamDB — depot 1961461](https://steamdb.info/depot/1961461/manifests/).

@@ -79,6 +79,60 @@ Typowe porady z internetu obchodzą problem:
 | Plik appmanifest tylko do odczytu | Steam potrafi wymusić zapis albo utknąć w pętli „aktualizacja w kolejce" |
 | Uruchamianie gry z pliku `.exe` | Działa, ale przycisk Graj pozostaje pułapką |
 
+## Czego nie widać po samym buildid
+
+Pierwsza wersja tego programu ustawiała wyłącznie `buildid` i `StateFlags`.
+Bywało to skuteczne, ale nie w każdym stanie instalacji — klient Steam potrafił
+mimo to zażądać pełnego pobrania. Zrzut wpisu pokazał, dlaczego:
+
+```
+"StateFlags"        "6"              4 (zainstalowana) + 2 (wymagana aktualizacja)
+"SizeOnDisk"        "0"
+"BytesToDownload"   "12679162208"
+"BytesDownloaded"   "0"
+"LastUpdated"       "0"
+"DownloadType"      "4"
+"InstalledDepots"   { }              ← pusta
+```
+
+Klient nie ogranicza się do porównania numeru kompilacji. Sprawdza **cały opis
+stanu instalacji** i musi zobaczyć go spójnym. Pusta lista `InstalledDepots`
+oznacza dla niego, że żaden depot nie znajduje się na dysku — i wtedy `buildid`
+nie ma już znaczenia. Tak samo działają zerowe `SizeOnDisk` oraz `BytesDownloaded`
+mniejsze od `BytesToDownload`.
+
+Stan taki powstaje po zakolejkowaniu instalacji, która nigdy się nie zakończyła —
+czyli dokładnie w wariancie oszczędnym, gdzie pobieranie bazowe jest celowo
+przerywane. Wpis opisuje wtedy instalację rozpoczętą, a nie ukończoną.
+
+Wzorcem jest wpis dowolnej poprawnie zainstalowanej gry:
+
+```
+"StateFlags"        "4"
+"SizeOnDisk"        "1763948872"
+"BytesDownloaded"   "1076154448"     równe BytesToDownload
+"LastUpdated"       "1773854952"
+"DownloadType"      "1"
+"InstalledDepots"
+{
+    "1054431"
+    {
+        "manifest"  "6863863002148515209"
+        "size"      "1763948872"
+    }
+}
+```
+
+Program odtwarza dokładnie taki układ. Identyfikator manifestu oraz rozmiary
+pobiera z `api.steamcmd.net`, z pola `depots.<depotid>.manifests.public`,
+i wpisuje wartości należące do **bieżącej** kompilacji — dzięki temu Steam widzi
+zawartość zgodną z wersją na serwerze, mimo że na dysku leżą pliki starsze.
+
+Blok `InstalledDepots` podmieniany jest w całości, z liczeniem nawiasów klamrowych,
+a pozostałe sekcje wpisu (`SharedDepots`, `UserConfig`, `MountedConfig`) zostają
+nietknięte. Wszystkie pola zapisywane są w jednym przebiegu i podmieniane atomowo,
+więc wpis nigdy nie pozostaje w stanie częściowo zmienionym.
+
 ## Rozwiązanie zastosowane w tym programie
 
 Skoro Steam ocenia stan instalacji **wyłącznie na podstawie metadanych**,
